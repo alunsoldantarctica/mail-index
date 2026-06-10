@@ -1,0 +1,28 @@
+# Index / data — never commit a user's mail
+*.sqlite
+*.sqlite-*
+*.db
+data/
+.local/
+
+# Credentials / secrets / local config
+*.env
+.env*
+*client_secret*.json
+*credentials*
+*token*.json
+.encryption_key
+config.local.*
+
+# Node
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.npm/
+
+# OS / editor
+.DS_Store
+*.log
+.idea/
+.vscode/
