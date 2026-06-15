@@ -1,0 +1,210 @@
+/**
+ * Enrich — phase 2 of progressive sync (SCOPE 1.1, PLAN §7 phase 2,
+ * CONTEXT.md "Enrichment", ADR-0003).
+ *
+ * Phase 1 (`ingest/sync.ts`) sweeps metadata for every Message in scope and
+ * leaves them at `body_state='meta'`. Enrich is the selective second pass: it
+ * promotes a chosen subset of `meta` rows to `full` by fetching the provider
+ * body, DISTILLING it (`ingest/distill.ts` — raw provider bytes are never
+ * persisted), and upserting at `body_state='full'` with `body_text` set. The
+ * repo (`index/repo.ts`) re-indexes FTS with the distilled body and enforces
+ * the no-downgrade invariant; this module never touches the FTS table directly.
+ *
+ * Properties this guarantees:
+ *  - **Selective** — only rows matching the {@link EnrichSelector} are promoted
+ *    (PLAN §7: curated profile → `--rule direct` → on-demand). M1.1 ships the
+ *    deterministic selectors: `rule`, `sender`, `match`, `limit`.
+ *  - **Incremental + idempotent** — only `meta` rows are candidates (the repo's
+ *    `selectMetaMessages` filters out `full`/`summary-only`), so a re-run
+ *    promotes only what is still un-enriched and never re-fetches a full body.
+ *  - **Audited** — writes a `sync_runs` row with `phase='enrich'` and the
+ *    selector summary, mirroring phase 1.
+ *
+ * Provider-neutral: speaks only the {@link MailSource} contract and the
+ * {@link Repo}. The CLI wires a concrete adapter; tests wire the fake.
+ */
+
+import type { MailSource } from '../source/index.js';
+import type { MetaSelector, Repo } from '../index/repo.js';
+import { IndexError } from '../index/db.js';
+import { distill } from './distill.js';
+
+/** Error thrown when an enrich run cannot start or run. */
+export class EnrichError extends Error {
+  override name = 'EnrichError';
+}
+
+/**
+ * Which `meta` rows to promote. Mirrors the CLI surface (PLAN §13):
+ * `--rule direct|all`, `--sender <addr>`, `--match <fts>`, `--limit N`. Fields
+ * combine with AND. An empty selector defaults to `rule: 'direct'` — the
+ * pre-curation heuristic (PLAN §7).
+ */
+export interface EnrichSelector {
+  rule?: 'direct' | 'all';
+  sender?: string;
+  match?: string;
+  limit?: number;
+}
+
+/** Options for {@link enrich}. */
+export interface EnrichOptions {
+  /** The account label whose meta rows to promote. */
+  account: string;
+  /** The provider adapter to fetch full bodies from. */
+  source: MailSource;
+  /** The repo to read candidates from and persist into. */
+  repo: Repo;
+  /** Which meta rows to promote. Defaults to `{ rule: 'direct' }`. */
+  selector?: EnrichSelector;
+}
+
+/** Outcome of a completed (or failed-then-recorded) enrich run. */
+export interface EnrichResult {
+  /** The `sync_runs.id` of the audit row written for this run. */
+  runId: number;
+  /** The account this run enriched. */
+  account: string;
+  /** Number of full records fetched from the source. */
+  fetched: number;
+  /** Number of Messages promoted to `full` in the index. */
+  enriched: number;
+  /** The selector recorded for the run. */
+  selector: string | null;
+}
+
+/**
+ * Render an {@link EnrichSelector} into the compact `sync_runs.selector` string.
+ * Stable key order; omits empty fields. Defaults the rule so the audit row
+ * records what actually ran.
+ */
+function describeSelector(selector: EnrichSelector): string {
+  const parts: string[] = [];
+  if (selector.rule) parts.push(`rule=${selector.rule}`);
+  if (selector.sender) parts.push(`sender=${selector.sender}`);
+  if (selector.match) parts.push(`match=${selector.match}`);
+  if (selector.limit != null) parts.push(`limit=${selector.limit}`);
+  return parts.join(' ');
+}
+
+/**
+ * Acquire the per-account lock by opening an `enrich` `sync_runs` row, refusing
+ * if another run for the account is already in flight (ADR-0005), exactly like
+ * phase-1 sync. Returns the new run's id.
+ */
+function acquireLock(repo: Repo, account: string, selector: string): number {
+  return repo.transaction(() => {
+    const held = repo.activeSyncRun(account);
+    if (held != null) {
+      throw new EnrichError(
+        `a sync/enrich for account "${account}" is already in progress (sync_runs id ${held}); refusing to start a second concurrent run`,
+      );
+    }
+    return repo.startSyncRun({ account, phase: 'enrich', selector });
+  });
+}
+
+/**
+ * Promote `meta` Messages matching `selector` to `full` for one account.
+ *
+ * Steps: resolve the selector to a default of `rule: 'direct'`, acquire the
+ * lock, select the candidate meta ids, then for each: fetch the full record,
+ * distil its body, and upsert at `body_state='full'` with the distilled
+ * `body_text`. Finally close the audit row with counts. On any failure the
+ * audit row is still closed (with `error`) and the lock released, then the
+ * error rethrown.
+ *
+ * Candidates are resolved once up front (a snapshot of the meta rows), so a
+ * mid-run upsert never reshapes the working set. Ids the provider can no longer
+ * return (`getFull` → null) are skipped (counted as neither fetched nor
+ * enriched) rather than failing the run.
+ */
+export async function enrich(options: EnrichOptions): Promise<EnrichResult> {
+  const { account, source, repo } = options;
+  if (!account || account.trim() === '') {
+    throw new EnrichError('enrich requires a non-empty account label');
+  }
+
+  // Resolve the selector. `--rule direct` is the pre-curation DEFAULT only when
+  // no narrower selector was given: an explicit `--sender`/`--match` means the
+  // user asked for exactly those rows and the direct heuristic must not also
+  // filter them out (a newsletter sender is still a valid `--sender` target).
+  const provided = options.selector ?? {};
+  const hasNarrowing = provided.sender != null || provided.match != null;
+  const selector: EnrichSelector =
+    provided.rule != null || !hasNarrowing ? { rule: 'direct', ...provided } : { ...provided };
+  const selectorStr = describeSelector(selector);
+
+  const runId = acquireLock(repo, account, selectorStr);
+
+  let fetched = 0;
+  let enriched = 0;
+  try {
+    const candidate: MetaSelector = {
+      ...(selector.rule ? { rule: selector.rule } : {}),
+      ...(selector.sender ? { sender: selector.sender } : {}),
+      ...(selector.match ? { match: selector.match } : {}),
+      ...(selector.limit != null ? { limit: selector.limit } : {}),
+    };
+    const ids = repo.selectMetaMessages(account, candidate);
+
+    for (const id of ids) {
+      const full = await source.getFull(id);
+      if (!full) continue; // gone from the provider — leave the meta row as-is.
+      fetched += 1;
+
+      const bodyText = distill({
+        bodyText: full.bodyText,
+        bodyHtml: full.bodyHtml,
+        mimeType: full.mimeType,
+      });
+
+      // Promote to full. The repo's upsert overwrites every metadata column
+      // from the input (ON CONFLICT DO UPDATE SET …), so we re-supply the full
+      // metadata the provider just returned rather than a sparse {id, bodyText}
+      // — otherwise the existing subject/sender/labels/etc. would be nulled out.
+      // Classification fields (category/is_list/direction) are already correct on
+      // the row from phase 1 and are derivable from these same labels; we keep
+      // them stable by re-deriving from the returned labels via the same source
+      // headers. To stay provider-neutral and avoid re-running classification
+      // here, we carry forward the existing row's classification.
+      const existing = repo.getMessage(account, id);
+      repo.upsertMessage({
+        account,
+        gmailMessageId: id,
+        threadId: full.threadId,
+        internalDate: full.internalDate,
+        dateHeader: full.dateHeader,
+        fromAddr: full.from,
+        toAddr: full.to,
+        ccAddr: full.cc,
+        subject: full.subject,
+        labels: full.labels,
+        category: existing?.category ?? null,
+        isList: existing ? existing.is_list === 1 : false,
+        direction: existing?.direction ?? 'received',
+        unread: existing ? existing.unread === 1 : false,
+        starred: existing ? existing.starred === 1 : false,
+        important: existing ? existing.important === 1 : false,
+        sizeEstimate: full.sizeEstimate,
+        snippet: full.snippet,
+        bodyState: 'full',
+        bodyText,
+      });
+      enriched += 1;
+    }
+
+    repo.finishSyncRun(runId, { fetched, indexed: enriched });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    try {
+      repo.finishSyncRun(runId, { fetched, indexed: enriched, error: message });
+    } catch {
+      // Nothing more to do if even closing the row fails; surface the original.
+    }
+    if (err instanceof EnrichError || err instanceof IndexError) throw err;
+    throw new EnrichError(`enrich failed for account "${account}": ${message}`);
+  }
+
+  return { runId, account, fetched, enriched, selector: selectorStr };
+}

@@ -14,7 +14,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { homedir } from 'node:os';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { runMigrations } from './migrations.js';
+import { getUserVersion, runMigrations } from './migrations.js';
 
 /** Error thrown for index-layer failures (open, migrate, repo invariants). */
 export class IndexError extends Error {
@@ -74,9 +74,34 @@ export function openDb(options: OpenOptions = {}): DatabaseSync {
   db.exec('PRAGMA foreign_keys = ON');
   db.exec('PRAGMA busy_timeout = 5000');
 
+  // Guard against opening the old single-file prototype DB (M1 carry-over). The
+  // prototype created a `messages` table without ever setting `user_version`, so
+  // a fresh-looking version-0 database that *already* contains app tables is not
+  // an empty DB the migrations can build into — running migration 1 would fail
+  // deep inside SQLite with a bare "table messages already exists". Detect that
+  // shape up front and emit an actionable IndexError instead.
   if (!options.skipMigrations) {
+    if (getUserVersion(db) === 0 && hasAppTables(db)) {
+      throw new IndexError(
+        `found a pre-existing un-versioned database at ${path} — looks like the old ` +
+          `prototype; move it aside (e.g. rename to ${path}.prototype-bak) or set a ` +
+          `different data dir (XDG_DATA_HOME) before running mail-index`,
+      );
+    }
     runMigrations(db);
   }
 
   return db;
+}
+
+/**
+ * Whether the database already carries this app's tables — used only to detect
+ * the un-versioned prototype DB (see {@link openDb}). Checks for the `messages`
+ * table, which both the prototype and the current schema create.
+ */
+function hasAppTables(db: DatabaseSync): boolean {
+  const row = db
+    .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'messages'`)
+    .get() as { name: string } | undefined;
+  return row != null;
 }

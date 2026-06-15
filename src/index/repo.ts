@@ -99,6 +99,21 @@ export interface SyncRunFinish {
   error?: string | null;
 }
 
+/**
+ * A selector for {@link Repo.selectMetaMessages} — which `meta` rows an enrich
+ * run should promote (PLAN §7 phase 2). Fields combine with AND.
+ */
+export interface MetaSelector {
+  /** `'direct'` applies the pre-curation heuristic; `'all'` matches every meta row. */
+  rule?: 'direct' | 'all';
+  /** Restrict to a single sender (bare address or exact `from_addr`). */
+  sender?: string;
+  /** Restrict to meta rows matching this FTS5 query. */
+  match?: string;
+  /** Cap the number of ids returned (newest-first). */
+  limit?: number;
+}
+
 export interface ContactInput {
   account: string;
   address: string;
@@ -362,6 +377,57 @@ export class Repo {
       ? stmt.all(query, opts.account, limit)
       : stmt.all(query, limit);
     return rows as unknown as MessageRow[];
+  }
+
+  /**
+   * Select `meta`-state message ids for an account that an enrich run should
+   * promote (SCOPE 1.1, PLAN §7 phase 2). Only `body_state='meta'` rows are
+   * returned — already-enriched (`full`) and demoted (`summary-only`) rows are
+   * skipped, which is what makes enrich incremental + idempotent. The `selector`
+   * narrows the set:
+   *
+   *  - `rule: 'direct'` — the pre-curation default: `is_list = 0 AND category
+   *    NOT IN ('promotions','social')` (PLAN §7).
+   *  - `rule: 'all'` — every meta row (no extra predicate).
+   *  - `sender` — exact `from_addr` match, OR (when it looks like a bare
+   *    address) a match on the address embedded in a `Name <addr>` from header.
+   *  - `match` — an FTS5 query; restrict to meta rows whose FTS row matches.
+   *
+   * Results are ordered newest-first by `internal_date` so a `limit` keeps the
+   * most recent mail. Selector fields combine with AND.
+   */
+  selectMetaMessages(account: string, selector: MetaSelector = {}): string[] {
+    const where: string[] = [`m.account = ?`, `m.body_state = 'meta'`];
+    const params: unknown[] = [account];
+
+    if (selector.rule === 'direct') {
+      where.push(`m.is_list = 0 AND (m.category IS NULL OR m.category NOT IN ('promotions','social'))`);
+    }
+
+    if (selector.sender) {
+      // Match the stored from_addr exactly OR by embedded bare address, so
+      // `--sender jordan@partner.example.com` matches `Jordan <jordan@...>`.
+      where.push(`(m.from_addr = ? OR lower(m.from_addr) LIKE ?)`);
+      params.push(selector.sender, `%<${selector.sender.toLowerCase()}>%`);
+    }
+
+    let fromClause = `messages m`;
+    if (selector.match) {
+      // Constrain to meta rows whose FTS row matches the query. Join the FTS
+      // table; FTS MATCH applies as a predicate.
+      fromClause = `messages_fts f JOIN messages m ON m.rowid = f.rowid`;
+      where.push(`messages_fts MATCH ?`);
+      params.push(selector.match);
+    }
+
+    let sql = `SELECT m.gmail_message_id AS id FROM ${fromClause} WHERE ${where.join(' AND ')} ORDER BY m.internal_date DESC`;
+    if (selector.limit != null) {
+      sql += ` LIMIT ?`;
+      params.push(selector.limit);
+    }
+
+    const rows = this.#prepare(sql).all(...(params as never[])) as { id: string }[];
+    return rows.map((r) => r.id);
   }
 
   /** Count messages, optionally scoped to one account. */
