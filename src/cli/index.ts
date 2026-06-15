@@ -1,10 +1,29 @@
 #!/usr/bin/env node
 /**
- * mail-index CLI entry point.
+ * mail-index CLI entry point (SCOPE 0.7, PLAN §13).
  *
- * M0.1 scaffold: prints usage and exits 0. Subcommands (init, sync, search,
- * status) land in M0.7.
+ * Hand-rolled subcommand routing over `node:util` parseArgs (zero deps, per the
+ * D2 no-friction spirit). The top-level dispatch peels the subcommand off argv,
+ * then each command parses its own flags. Commands that touch the index open the
+ * DB lazily (so `init`/`--help` never require an existing index) and always
+ * close it.
+ *
+ * Output contract: human-readable text on stdout; errors on stderr with a
+ * non-zero exit. The `--json` paths (status) emit machine-readable JSON for the
+ * tray/scheduler ladder + ADR-0005.
  */
+
+import { parseArgs } from 'node:util';
+
+import { ConfigError, loadConfig } from '../config/index.js';
+import { IndexError, openDb } from '../index/db.js';
+import { Repo } from '../index/repo.js';
+import { SyncError } from '../ingest/sync.js';
+
+import { formatInit, runInit } from './init.js';
+import { formatSyncResult, runSyncOne, type SyncFlags } from './sync.js';
+import { formatResults, runSearch, type SearchFlags } from './search.js';
+import { buildStatus, formatStatus, formatStatusJson } from './status.js';
 
 const USAGE = `mail-index — a local, agent-queryable mail intelligence layer
 
@@ -12,17 +31,230 @@ Usage:
   mail-index <command> [options]
 
 Commands:
-  init      Initialize the local index and operator config
-  sync      Sync message metadata for an account
-  search    Search the index
-  status    Show index status
+  init                          Scaffold the operator config + data dir
+  sync    --account <label>     Sync message metadata for an account
+  search  <terms>               Recall over the index (ranked, snippet-first)
+  status                        Show per-account index freshness + counts
 
 Run 'mail-index <command> --help' for command-specific options.
 `;
 
-function main(): number {
-  process.stdout.write(USAGE);
+const SYNC_USAGE = `mail-index sync — phase-1 metadata sweep for an account
+
+Usage:
+  mail-index sync --account <label> [--since <30d|1mo>] [--all] [--query <q>] [--limit N]
+  mail-index sync --all-accounts
+
+Options:
+  --account <label>   Account label from the operator config (required unless --all-accounts)
+  --since <token>     Lower bound on message age (e.g. 30d, 1mo); overrides the account policy
+  --all               Whole mailbox — ignore --since / --limit and the account's policy bounds
+  --query <q>         Provider-native search filter (e.g. from:bloomberg.com)
+  --limit N           Cap the number of ids the sweep enumerates
+  --all-accounts      Sync every configured account using its own policy presets
+`;
+
+const SEARCH_USAGE = `mail-index search — ranked recall over the index
+
+Usage:
+  mail-index search <terms...> [--account <label>] [--limit N]
+
+Options:
+  --account <label>   Restrict the search to one account
+  --limit N           Maximum hits to return (default 20)
+`;
+
+const STATUS_USAGE = `mail-index status — per-account index freshness + counts
+
+Usage:
+  mail-index status [--json]
+
+Options:
+  --json   Emit a machine-readable JSON report (for tray/scheduler use)
+`;
+
+/** Parse a `--limit`-style integer flag, throwing a CLI error on bad input. */
+function parseLimit(raw: string | undefined, flag: string): number | undefined {
+  if (raw == null) return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0) {
+    throw new CliError(`${flag} must be a non-negative integer, got "${raw}"`);
+  }
+  return n;
+}
+
+/** A user-facing CLI error: message goes to stderr, exit code 2. */
+class CliError extends Error {
+  override name = 'CliError';
+}
+
+function cmdInit(): number {
+  const result = runInit();
+  process.stdout.write(formatInit(result));
   return 0;
 }
 
-process.exit(main());
+async function cmdSync(argv: string[]): Promise<number> {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      account: { type: 'string' },
+      since: { type: 'string' },
+      all: { type: 'boolean' },
+      query: { type: 'string' },
+      limit: { type: 'string' },
+      'all-accounts': { type: 'boolean' },
+      help: { type: 'boolean' },
+    },
+    allowPositionals: false,
+  });
+
+  if (values.help) {
+    process.stdout.write(SYNC_USAGE);
+    return 0;
+  }
+
+  const flags: SyncFlags = {
+    since: values.since,
+    all: values.all,
+    query: values.query,
+    limit: parseLimit(values.limit, '--limit'),
+  };
+
+  const config = loadConfig();
+  const db = openDb();
+  try {
+    const repo = new Repo(db);
+
+    if (values['all-accounts']) {
+      const labels = Object.keys(config.accounts);
+      if (labels.length === 0) {
+        throw new CliError('no accounts configured — run mail-index init and edit the config');
+      }
+      let failures = 0;
+      for (const label of labels) {
+        try {
+          const result = await runSyncOne(config, label, flags, repo);
+          process.stdout.write(formatSyncResult(result) + '\n');
+        } catch (err) {
+          failures += 1;
+          process.stderr.write(`${label}: sync failed — ${(err as Error).message}\n`);
+        }
+      }
+      return failures > 0 ? 1 : 0;
+    }
+
+    if (!values.account) {
+      throw new CliError('sync requires --account <label> (or --all-accounts)');
+    }
+    const result = await runSyncOne(config, values.account, flags, repo);
+    process.stdout.write(formatSyncResult(result) + '\n');
+    return 0;
+  } finally {
+    db.close();
+  }
+}
+
+function cmdSearch(argv: string[]): number {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: {
+      account: { type: 'string' },
+      limit: { type: 'string' },
+      help: { type: 'boolean' },
+    },
+    allowPositionals: true,
+  });
+
+  if (values.help) {
+    process.stdout.write(SEARCH_USAGE);
+    return 0;
+  }
+
+  if (positionals.length === 0) {
+    throw new CliError('search requires one or more terms');
+  }
+
+  const flags: SearchFlags = {
+    account: values.account,
+    limit: parseLimit(values.limit, '--limit'),
+  };
+
+  const db = openDb();
+  try {
+    const repo = new Repo(db);
+    const rows = runSearch(repo, positionals, flags);
+    process.stdout.write(formatResults(rows, positionals));
+    return 0;
+  } finally {
+    db.close();
+  }
+}
+
+function cmdStatus(argv: string[]): number {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      json: { type: 'boolean' },
+      help: { type: 'boolean' },
+    },
+    allowPositionals: false,
+  });
+
+  if (values.help) {
+    process.stdout.write(STATUS_USAGE);
+    return 0;
+  }
+
+  const db = openDb();
+  try {
+    const repo = new Repo(db);
+    const report = buildStatus(repo);
+    process.stdout.write(values.json ? formatStatusJson(report) : formatStatus(report));
+    return 0;
+  } finally {
+    db.close();
+  }
+}
+
+async function main(argv: string[]): Promise<number> {
+  const [command, ...rest] = argv;
+
+  if (command == null || command === '--help' || command === '-h' || command === 'help') {
+    process.stdout.write(USAGE);
+    return 0;
+  }
+
+  switch (command) {
+    case 'init':
+      return cmdInit();
+    case 'sync':
+      return cmdSync(rest);
+    case 'search':
+      return cmdSearch(rest);
+    case 'status':
+      return cmdStatus(rest);
+    default:
+      process.stderr.write(`unknown command "${command}"\n\n`);
+      process.stderr.write(USAGE);
+      return 2;
+  }
+}
+
+main(process.argv.slice(2))
+  .then((code) => process.exit(code))
+  .catch((err: unknown) => {
+    if (
+      err instanceof ConfigError ||
+      err instanceof IndexError ||
+      err instanceof SyncError ||
+      err instanceof CliError
+    ) {
+      process.stderr.write(`error: ${err.message}\n`);
+    } else if (err instanceof Error) {
+      process.stderr.write(`error: ${err.message}\n`);
+    } else {
+      process.stderr.write(`error: ${String(err)}\n`);
+    }
+    process.exit(2);
+  });
