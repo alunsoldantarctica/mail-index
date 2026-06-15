@@ -103,6 +103,17 @@ export interface MessageMetadata {
   snippet: string | null;
   /** Provider estimate of the message size in bytes, when known. */
   sizeEstimate: number | null;
+  /**
+   * The full raw header bag from a plain `format=metadata` fetch, keyed by
+   * header name as the provider supplied it (any case), value the raw header
+   * value. Classification (§8) tests these for *presence* only — notably
+   * `List-Id` / `List-Unsubscribe` drive `is_list`. The §8 pitfall forbids a
+   * restricted (`metadataHeaders`) projection, so adapters MUST hand over the
+   * complete bag; an empty object means "the provider returned no headers",
+   * never "headers were filtered". Optional so legacy fixtures without a header
+   * bag still satisfy the shape (classification then falls back to labels).
+   */
+  headers?: Record<string, string>;
 }
 
 /**

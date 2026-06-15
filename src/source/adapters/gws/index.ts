@@ -88,6 +88,19 @@ interface GmailProfile {
   emailAddress?: string;
 }
 
+/**
+ * Collect every header on a payload into a name → value bag (§8: the complete,
+ * unrestricted header set classification needs for `List-*` presence). Last
+ * value wins on a duplicate header name — presence is all classification reads.
+ */
+function headerBag(payload: GmailPayload | undefined): Record<string, string> {
+  const bag: Record<string, string> = {};
+  for (const h of payload?.headers ?? []) {
+    if (h.name != null && h.value != null) bag[h.name] = h.value;
+  }
+  return bag;
+}
+
 /** Case-insensitive lookup of a single header value from a payload. */
 function header(payload: GmailPayload | undefined, name: string): string | null {
   const headers = payload?.headers;
@@ -152,6 +165,7 @@ function toMetadata(msg: GmailMessage): MessageMetadata {
     labels: msg.labelIds ?? [],
     snippet: msg.snippet ?? null,
     sizeEstimate: msg.sizeEstimate ?? null,
+    headers: headerBag(msg.payload),
   };
 }
 

@@ -388,6 +388,22 @@ export class Repo {
     return Number(res.lastInsertRowid);
   }
 
+  /**
+   * The id of an in-progress sync_runs row for `account` (started but not yet
+   * finished), or undefined when none. An in-progress row is the per-account
+   * sync LOCK (ADR-0005): the sync layer refuses a second concurrent run while
+   * one exists. When `exceptId` is given it is ignored — so a freshly opened run
+   * can ask "is anyone else running?" without seeing itself.
+   */
+  activeSyncRun(account: string, exceptId?: number): number | undefined {
+    const row = this.#prepare(
+      `SELECT id FROM sync_runs
+        WHERE account = ? AND finished_at IS NULL AND id != ?
+        ORDER BY id LIMIT 1`,
+    ).get(account, exceptId ?? -1) as { id: number } | undefined;
+    return row?.id;
+  }
+
   /** Close a sync_runs row with counts and optional error. */
   finishSyncRun(id: number, result: SyncRunFinish = {}): void {
     this.#prepare(

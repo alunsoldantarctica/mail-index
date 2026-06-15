@@ -31,6 +31,7 @@ function toMetadata(m: MessageFull): MessageMetadata {
     labels: m.labels,
     snippet: m.snippet,
     sizeEstimate: m.sizeEstimate,
+    ...(m.headers ? { headers: m.headers } : {}),
   };
 }
 

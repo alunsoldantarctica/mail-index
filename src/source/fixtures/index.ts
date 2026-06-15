@@ -53,6 +53,10 @@ export const LIST_MESSAGE: MessageFull = {
   labels: ['INBOX', 'CATEGORY_UPDATES', 'UNREAD'],
   snippet: 'Top stories: new zodiac schedules, ice-class vessel availability…',
   sizeEstimate: 28_672,
+  headers: {
+    'List-Id': 'Expedition Weekly <news.bulletin.example.org>',
+    'List-Unsubscribe': '<https://bulletin.example.org/unsubscribe>',
+  },
   bodyText: null,
   bodyHtml:
     '<html><body><h1>This week in polar logistics</h1>' +
