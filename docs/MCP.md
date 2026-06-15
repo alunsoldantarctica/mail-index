@@ -112,7 +112,7 @@ All of the above also carry `index_as_of` on the top-level response object.
 
 ## Tools
 
-The full surface is **16 tools**. Account resolution: tools that need an account
+The full surface is **18 tools**. Account resolution: tools that need an account
 take an optional `account`; when omitted and exactly one account is configured /
 indexed, it is used, otherwise the tool errors asking for one.
 

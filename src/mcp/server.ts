@@ -74,8 +74,8 @@ function obj(
 }
 
 /**
- * The full PLAN §12 surface — 16 tools (curation is three: propose/set/get;
- * categorization two; the composites two). Every entry advertises a compact
+ * The full PLAN §12 surface — 18 tools (14 primitives incl. curation's three
+ * propose/set/get and categorization's two, plus the two composites). Every entry advertises a compact
  * input schema and dispatches to the pure engine. Descriptions tell the agent
  * the recall-first, token-conscious contract (compact shapes, handbacks for
  * bulk work, `index_as_of` on every response).
@@ -373,9 +373,14 @@ export async function serve(ctx: ToolContext): Promise<Server> {
  * write (WAL is on; the sync_runs lock is the guard). Returns true once spawned.
  * Best-effort: a spawn failure returns false rather than throwing into a read.
  */
-export function spawnDetachedSync(account: string): boolean {
+export function spawnDetachedSync(account: string, since?: string): boolean {
   try {
-    const child = spawn(process.execPath, [cliEntry(), 'sync', '--account', account], {
+    // ADR-0005: incremental, never a full sweep — pass the caller-derived
+    // `--since` so an account with a whole-mailbox policy still syncs only the
+    // recent window on a stale read.
+    const args = [cliEntry(), 'sync', '--account', account];
+    if (since) args.push('--since', since);
+    const child = spawn(process.execPath, args, {
       detached: true,
       stdio: 'ignore',
     });

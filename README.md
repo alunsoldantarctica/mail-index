@@ -11,7 +11,7 @@ Local-first — the index never leaves your machine. Read-only — it never send
 mutates your mail.
 
 > **Status: v1.0.** Progressive sync, the correspondence graph, the interest
-> engine, curation, the full 16-tool MCP surface, and the write-back loops are
+> engine, curation, the full 18-tool MCP surface, and the write-back loops are
 > shipped. The full architecture and build plan live in
 > **[docs/PLAN.md](docs/PLAN.md)**; start with **[docs/INSTALL.md](docs/INSTALL.md)**.
 
@@ -74,7 +74,7 @@ mail-index status  [--json]              Per-account freshness + counts
 - **[docs/INSTALL.md](docs/INSTALL.md)** — generic onboarding (install,
   authenticate a MailSource, init, sync, curate, enrich, add the MCP server,
   scheduled-sync snippet).
-- **[docs/MCP.md](docs/MCP.md)** — the 16-tool MCP reference for agent
+- **[docs/MCP.md](docs/MCP.md)** — the 18-tool MCP reference for agent
   integrators: args, compact result shapes, the `index_as_of` freshness +
   command-handback contracts.
 - **[docs/ADAPTERS.md](docs/ADAPTERS.md)** — the `MailSource` contract and how to

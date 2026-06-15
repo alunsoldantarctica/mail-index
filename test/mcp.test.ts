@@ -408,13 +408,15 @@ test('catch_up: STALE index returns data + sync_started + eta + handback, spawns
   seedMailbox(repo);
   // Curate VIP important so its recent mail surfaces in fromImportant.
   curationSet(repo, ACCOUNT, { contacts: [{ address: 'vip@partner.example.com', curation: 'important' }] });
-  // Stale: last sync 3 hours ago (> 1h threshold).
-  recordSync(repo, new Date(T - 3 * 3_600_000).toISOString());
+  // Stale: last sync 13 hours ago (> 12h threshold).
+  recordSync(repo, new Date(T - 13 * 3_600_000).toISOString());
 
   let spawnedFor = null;
+  let spawnedSince = null;
   const ctx = ctxFor(repo, {
-    backgroundSync: (account) => {
+    backgroundSync: (account, since) => {
       spawnedFor = account;
+      spawnedSince = since ?? null;
       return true;
     },
   });
@@ -424,6 +426,9 @@ test('catch_up: STALE index returns data + sync_started + eta + handback, spawns
   assert.equal(res.sync_started, true, 'stale read spawned a background sync');
   assert.equal(res.eta_seconds, 90);
   assert.equal(spawnedFor, ACCOUNT, 'detached sync spawned for the account');
+  // ADR-0005: the spawn is INCREMENTAL — a relative --since derived from the
+  // 13h-old index (ceil(13h/24h)+1 = 2 days), never a full sweep.
+  assert.equal(spawnedSince, '2d', 'background sync is incremental, not a full sweep');
   assert.equal(res.bodies_command, handback('enrich', '--account', ACCOUNT, '--profile'), 'O(N) bodies via handback');
   assert.ok('index_as_of' in res);
 });

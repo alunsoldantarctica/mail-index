@@ -67,7 +67,7 @@ export class McpToolError extends Error {
  * ADR-0005); tests wire a spy. Returns `true` when a sync was actually started,
  * `false` when it was debounced/declined (e.g. a sync is already running).
  */
-export type BackgroundSync = (account: string) => boolean;
+export type BackgroundSync = (account: string, since?: string) => boolean;
 
 /** Everything the tools read/write. INDEX-ONLY except the one O(1) enrich seam. */
 export interface ToolContext {
@@ -87,8 +87,9 @@ export interface ToolContext {
   now?: () => Date;
 }
 
-/** The freshness staleness threshold for time-sensitive reads (ADR-0005): 1h. */
-export const STALE_AFTER_MS = 60 * 60 * 1000;
+/** The freshness staleness threshold for time-sensitive reads (ADR-0005): ~12h.
+ * Per-account override is a v1.x follow-up; this global default matches the ADR. */
+export const STALE_AFTER_MS = 12 * 60 * 60 * 1000;
 /** Reported ETA for a spawned background incremental sync (ADR-0005). */
 export const SYNC_ETA_SECONDS = 90;
 
@@ -929,7 +930,16 @@ function applyStaleSync<T extends { sync_started?: boolean; eta_seconds?: number
   // Debounce: never two writers (WAL is on; the sync_runs lock is the guard).
   if (ctx.repo.activeSyncRun(account) != null) return result;
   if (!ctx.backgroundSync) return result;
-  const started = ctx.backgroundSync(account);
+  // ADR-0005: the background sweep must be INCREMENTAL, never a full sweep. Derive
+  // a relative `--since` from the last-synced timestamp (Gmail `newer_than:` takes
+  // relative tokens, not ISO) — days elapsed + 1 day of overlap (idempotent upsert
+  // makes re-fetching the boundary day harmless). A never-synced account (asOf null)
+  // passes no `since`, so its first sweep is a correct initial full sync.
+  const since =
+    asOf == null
+      ? undefined
+      : `${Math.ceil((now - new Date(asOf).getTime()) / 86_400_000) + 1}d`;
+  const started = ctx.backgroundSync(account, since);
   if (started) {
     result.sync_started = true;
     result.eta_seconds = SYNC_ETA_SECONDS;
