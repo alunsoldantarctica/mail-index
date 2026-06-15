@@ -276,6 +276,53 @@ export interface ThreadRow {
   last_at: string | null;
 }
 
+/**
+ * A contact row joined with the curation signals the curation propose() step
+ * (M3.1, PLAN §11) ranks on. Aggregate columns + `engagement_score` come
+ * straight off `contacts`; `is_list` is a derived 0/1 flag — 1 when the contact
+ * is *predominantly* bulk (more than half of received mail is is_list /
+ * promotions / social), the same classification signal the scorer penalises.
+ * Snake_case rows (repo convention). Ordered by engagement_score desc (NULLs
+ * last), then sent then received volume.
+ */
+export interface CurationContactRow {
+  address: string;
+  display_name: string | null;
+  domain: string | null;
+  msgs_received: number;
+  msgs_sent: number;
+  read_count: number;
+  replied_count: number;
+  starred_count: number;
+  important_count: number;
+  last_seen: string | null;
+  engagement_score: number | null;
+  is_list: number;
+  curation: Curation | null;
+}
+
+/**
+ * A domain row the curation propose() step ranks on. Aggregate columns +
+ * `engagement_score` come off `domains`; the domain has no per-contact reply
+ * signal so it is ranked by `engagement_score` (NULLs last) then message volume.
+ * Snake_case rows (repo convention).
+ */
+export interface CurationDomainRow {
+  domain: string;
+  msgs: number;
+  distinct_contacts: number;
+  engagement_score: number | null;
+  category: string | null;
+  curation: Curation | null;
+}
+
+/** The persisted interest profile for an account (M3.1, PLAN §11). */
+export interface InterestProfileRow {
+  account: string;
+  keywords: string[];
+  updated_at: string | null;
+}
+
 export class Repo {
   readonly db: DatabaseSync;
 
@@ -1084,5 +1131,162 @@ export class Repo {
     ).get(account, address) as
       | { centrality: number | null; community_id: number | null }
       | undefined;
+  }
+
+  // ---- curation surface (M3.1, PLAN §11, D13/D14) -------------------------
+  //
+  // INDEX-ONLY (PLAN §4): the curation loop reads the derived/scored rows to
+  // PROPOSE a ranked shortlist (the seed, D13) and writes the user's disposition
+  // back onto `contacts.curation` / `domains.curation` and the freeform
+  // `interest_profile` keywords. Touches no provider; triggers no enrichment.
+
+  /**
+   * Top contacts for the curation shortlist (D13, PLAN §11). Ordered by
+   * `engagement_score` descending with NULL scores last (an unscored contact
+   * has never been through the interest pass), then by sent then received
+   * volume so ties resolve toward Correspondents. `is_list` is derived: 1 when
+   * MORE THAN HALF the contact's received mail is bulk (is_list / promotions /
+   * social) — the same signal the scorer penalises — so the agent can suggest
+   * `muted` for predominantly-bulk senders. `limit` caps the shortlist
+   * (token-conscious; default 20).
+   */
+  curationContacts(account: string, limit = 20): CurationContactRow[] {
+    const rows = this.#prepare(
+      `SELECT c.address, c.display_name, c.domain, c.msgs_received, c.msgs_sent,
+              c.read_count, c.replied_count, c.starred_count, c.important_count,
+              c.last_seen, c.engagement_score, c.curation,
+              CASE
+                WHEN c.msgs_received > 0 AND (
+                  SELECT count(*) FROM messages m
+                   WHERE m.account = c.account
+                     AND m.direction = 'received'
+                     AND (m.is_list = 1 OR m.category IN ('promotions','social'))
+                     AND (
+                       m.from_addr = c.address
+                       OR lower(m.from_addr) LIKE '%<' || lower(c.address) || '>%'
+                     )
+                ) * 2 > c.msgs_received
+                THEN 1 ELSE 0
+              END AS is_list
+         FROM contacts c
+        WHERE c.account = ?
+        ORDER BY c.engagement_score IS NULL, c.engagement_score DESC,
+                 c.msgs_sent DESC, c.msgs_received DESC, c.address ASC
+        LIMIT ?`,
+    ).all(account, limit) as unknown as CurationContactRow[];
+    return rows;
+  }
+
+  /**
+   * Top domains for the curation shortlist (D13, PLAN §11). Ordered by
+   * `engagement_score` descending (NULLs last) then message volume. `limit`
+   * caps the shortlist (token-conscious; default 20).
+   */
+  curationDomains(account: string, limit = 20): CurationDomainRow[] {
+    const rows = this.#prepare(
+      `SELECT domain, msgs, distinct_contacts, engagement_score, category, curation
+         FROM domains
+        WHERE account = ?
+        ORDER BY engagement_score IS NULL, engagement_score DESC,
+                 msgs DESC, domain ASC
+        LIMIT ?`,
+    ).all(account, limit) as unknown as CurationDomainRow[];
+    return rows;
+  }
+
+  /**
+   * Set a contact's curation label (null clears it). The contact must already
+   * exist (the aggregation owns row lifecycle); a missing address is a no-op so
+   * the caller can apply a shortlist without first checking presence. Returns
+   * whether a row was updated.
+   */
+  setContactCuration(account: string, address: string, curation: Curation | null): boolean {
+    if (curation != null && !CURATIONS.includes(curation)) {
+      throw new IndexError(`invalid curation: ${String(curation)}`);
+    }
+    const res = this.#prepare(
+      `UPDATE contacts SET curation = ? WHERE account = ? AND address = ?`,
+    ).run(curation, account, address);
+    return res.changes > 0;
+  }
+
+  /**
+   * Set a domain's curation label (null clears it). Unlike a contact, a domain
+   * the user wants to curate may not yet have an aggregated row (e.g. blocking a
+   * domain pre-emptively), so this UPSERTS the domain row, preserving any
+   * existing aggregate/category columns. Returns nothing (always succeeds).
+   */
+  setDomainCuration(account: string, domain: string, curation: Curation | null): void {
+    if (curation != null && !CURATIONS.includes(curation)) {
+      throw new IndexError(`invalid curation: ${String(curation)}`);
+    }
+    this.#prepare(
+      `INSERT INTO domains (account, domain, curation) VALUES (?, ?, ?)
+       ON CONFLICT(account, domain) DO UPDATE SET curation = excluded.curation`,
+    ).run(account, domain, curation);
+  }
+
+  /**
+   * The contacts that currently carry a curation label, for reading back the
+   * profile (M3.1, PLAN §11). Ordered by address for a stable shape. `curation`
+   * is non-null by the WHERE clause.
+   */
+  curatedContacts(account: string): { address: string; curation: Curation }[] {
+    return this.#prepare(
+      `SELECT address, curation FROM contacts
+        WHERE account = ? AND curation IS NOT NULL
+        ORDER BY address ASC`,
+    ).all(account) as unknown as { address: string; curation: Curation }[];
+  }
+
+  /** The domains that currently carry a curation label (see {@link curatedContacts}). */
+  curatedDomains(account: string): { domain: string; curation: Curation }[] {
+    return this.#prepare(
+      `SELECT domain, curation FROM domains
+        WHERE account = ? AND curation IS NOT NULL
+        ORDER BY domain ASC`,
+    ).all(account) as unknown as { domain: string; curation: Curation }[];
+  }
+
+  /**
+   * Read the account's interest profile: the freeform curation keywords and the
+   * `updated_at` stamp. Returns an empty (no keywords, null timestamp) profile
+   * when the account has never been curated, so callers never special-case
+   * absence. Keywords are JSON-decoded from `keywords_json`.
+   */
+  getInterestProfile(account: string): InterestProfileRow {
+    const row = this.#prepare(
+      `SELECT keywords_json, updated_at FROM interest_profile WHERE account = ?`,
+    ).get(account) as { keywords_json: string | null; updated_at: string | null } | undefined;
+    let keywords: string[] = [];
+    if (row?.keywords_json) {
+      try {
+        const parsed: unknown = JSON.parse(row.keywords_json);
+        if (Array.isArray(parsed)) {
+          keywords = parsed.filter((k): k is string => typeof k === 'string');
+        }
+      } catch {
+        keywords = [];
+      }
+    }
+    return { account, keywords, updated_at: row?.updated_at ?? null };
+  }
+
+  /**
+   * Persist the account's freeform interest keywords and bump `updated_at`
+   * (M3.1, PLAN §11). Keywords are stored as a JSON array in `keywords_json`;
+   * the write is idempotent (same keywords → same row, fresh `updated_at`).
+   * Returns the stamped `updated_at`.
+   */
+  setInterestKeywords(account: string, keywords: readonly string[], at?: string): string {
+    const updatedAt = at ?? new Date().toISOString();
+    this.#prepare(
+      `INSERT INTO interest_profile (account, keywords_json, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(account) DO UPDATE SET
+         keywords_json = excluded.keywords_json,
+         updated_at    = excluded.updated_at`,
+    ).run(account, JSON.stringify([...keywords]), updatedAt);
+    return updatedAt;
   }
 }

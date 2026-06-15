@@ -20,6 +20,9 @@ export type {
   ScoredContactInput,
   GraphThread,
   GraphMetricInput,
+  CurationContactRow,
+  CurationDomainRow,
+  InterestProfileRow,
 } from './repo.js';
 export {
   SCHEMA_VERSION,
