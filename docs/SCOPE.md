@@ -1,4 +1,11 @@
-# mail-index — Development Scope (v0.x → v1.0)
+# mail-index — Development Scope (v0.x → v1.0) — ✅ v1.0 SHIPPED 2026-06-16
+
+All four milestones built, committed to main, verified (build + lint clean, full
+node:test suite green), and dogfooded live against real Gmail. The MCP server
+boots over stdio and serves the full 18-tool surface. M0 (UNS-1207), M1
+(UNS-1215), M2 (UNS-1220), M3 (UNS-1224) and all sub-issues closed.
+
+
 
 Derived from [PLAN.md](PLAN.md). Status: filed in Linear (team UNS,
 2026-06-10): **M0 = UNS-1207** (subs 1208–1214), **M1 = UNS-1215** (subs
