@@ -45,6 +45,16 @@ export interface EnrichSelector {
   sender?: string;
   match?: string;
   limit?: number;
+  /**
+   * Profile-driven enrichment (M3.2, PLAN §7 priority-1 policy, D14): resolve
+   * the candidate set from the curated `interest_profile` instead of the
+   * heuristic — curated-`important` contacts/domains → always; `muted`/`blocked`
+   * → never; interest-keyword FTS matches → yes. When set, `rule`/`sender`/
+   * `match` are ignored (the profile IS the policy); only `limit` still caps the
+   * resolved set. The selector resolution lives in
+   * `repo.selectProfileMetaMessages`.
+   */
+  profile?: boolean;
 }
 
 /** Options for {@link enrich}. */
@@ -80,6 +90,7 @@ export interface EnrichResult {
  */
 function describeSelector(selector: EnrichSelector): string {
   const parts: string[] = [];
+  if (selector.profile) parts.push('profile');
   if (selector.rule) parts.push(`rule=${selector.rule}`);
   if (selector.sender) parts.push(`sender=${selector.sender}`);
   if (selector.match) parts.push(`match=${selector.match}`);
@@ -225,14 +236,22 @@ export async function enrich(options: EnrichOptions): Promise<EnrichResult> {
     throw new EnrichError('enrich requires a non-empty account label');
   }
 
-  // Resolve the selector. `--rule direct` is the pre-curation DEFAULT only when
-  // no narrower selector was given: an explicit `--sender`/`--match` means the
-  // user asked for exactly those rows and the direct heuristic must not also
-  // filter them out (a newsletter sender is still a valid `--sender` target).
+  // Resolve the selector. Three modes, in precedence order:
+  //  - `profile` — the curated interest_profile IS the policy (M3.2, §7
+  //    priority 1). It ignores rule/sender/match entirely (only `limit` still
+  //    applies) so the profile alone decides the candidate set.
+  //  - explicit `--sender`/`--match` — the user asked for exactly those rows, so
+  //    the `direct` heuristic must NOT also filter them out.
+  //  - otherwise — `--rule direct` is the pre-curation DEFAULT.
   const provided = options.selector ?? {};
-  const hasNarrowing = provided.sender != null || provided.match != null;
-  const selector: EnrichSelector =
-    provided.rule != null || !hasNarrowing ? { rule: 'direct', ...provided } : { ...provided };
+  let selector: EnrichSelector;
+  if (provided.profile) {
+    selector = { profile: true, ...(provided.limit != null ? { limit: provided.limit } : {}) };
+  } else {
+    const hasNarrowing = provided.sender != null || provided.match != null;
+    selector =
+      provided.rule != null || !hasNarrowing ? { rule: 'direct', ...provided } : { ...provided };
+  }
   const selectorStr = describeSelector(selector);
 
   const runId = acquireLock(repo, account, selectorStr);
@@ -240,13 +259,20 @@ export async function enrich(options: EnrichOptions): Promise<EnrichResult> {
   let fetched = 0;
   let enriched = 0;
   try {
-    const candidate: MetaSelector = {
-      ...(selector.rule ? { rule: selector.rule } : {}),
-      ...(selector.sender ? { sender: selector.sender } : {}),
-      ...(selector.match ? { match: selector.match } : {}),
-      ...(selector.limit != null ? { limit: selector.limit } : {}),
-    };
-    const ids = repo.selectMetaMessages(account, candidate);
+    // Profile mode resolves candidates from the curated interest_profile; every
+    // other mode resolves them from the deterministic MetaSelector.
+    let ids: string[];
+    if (selector.profile) {
+      ids = repo.selectProfileMetaMessages(account, selector.limit);
+    } else {
+      const candidate: MetaSelector = {
+        ...(selector.rule ? { rule: selector.rule } : {}),
+        ...(selector.sender ? { sender: selector.sender } : {}),
+        ...(selector.match ? { match: selector.match } : {}),
+        ...(selector.limit != null ? { limit: selector.limit } : {}),
+      };
+      ids = repo.selectMetaMessages(account, candidate);
+    }
 
     for (const id of ids) {
       const promoted = await promoteOne(account, id, source, repo);

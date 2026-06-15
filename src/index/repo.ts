@@ -637,6 +637,102 @@ export class Repo {
     return rows.map((r) => r.id);
   }
 
+  /**
+   * Resolve the curated `interest_profile` into the set of `meta` ids an
+   * `enrich --profile` run should promote (SCOPE 3.2, PLAN §7 priority-1 policy,
+   * D14). The curated profile IS the enrichment policy; this method is the one
+   * place that translates it into a deterministic candidate id set, exactly
+   * mirroring §7's priority order:
+   *
+   *  - **important → always.** A meta row whose sender is a curated-`important`
+   *    contact, OR whose sender's domain is a curated-`important` domain, is
+   *    enriched. (Domain match keys on the `@domain` suffix of `from_addr`,
+   *    matching both a bare `addr@dom` and a `Name <addr@dom>` header.)
+   *  - **keyword matches → yes.** A meta row matching the FTS query built from
+   *    the profile's freeform `keywords` (OR-joined) is enriched.
+   *  - **muted / blocked → never.** A meta row whose sender is a curated
+   *    `muted`/`blocked` contact, or whose sender domain is a `muted`/`blocked`
+   *    domain, is EXCLUDED even when it also matches a keyword — the negative
+   *    disposition wins (§7: "muted → never"). This is the dominating filter.
+   *
+   * Returns newest-first by `internal_date`; `limit` caps the set. Returns an
+   * empty array when the profile selects nothing (no important entities and no
+   * keyword hits) — the caller treats that as "the profile enriches nothing
+   * here", not an error. INDEX-ONLY: reads derived rows + FTS, no provider.
+   */
+  selectProfileMetaMessages(account: string, limit?: number): string[] {
+    // The curated dispositions. `important` entities drive inclusion; `muted`
+    // and `blocked` drive exclusion (both mean "never enrich", §7).
+    const importantAddrs = this.#prepare(
+      `SELECT address FROM contacts WHERE account = ? AND curation = 'important'`,
+    ).all(account) as { address: string }[];
+    const importantDomains = this.#prepare(
+      `SELECT domain FROM domains WHERE account = ? AND curation = 'important'`,
+    ).all(account) as { domain: string }[];
+    const mutedAddrs = this.#prepare(
+      `SELECT address FROM contacts WHERE account = ? AND curation IN ('muted','blocked')`,
+    ).all(account) as { address: string }[];
+    const mutedDomains = this.#prepare(
+      `SELECT domain FROM domains WHERE account = ? AND curation IN ('muted','blocked')`,
+    ).all(account) as { domain: string }[];
+    const keywords = this.getInterestProfile(account).keywords;
+
+    // INCLUSION predicate: sender is an important contact OR sender domain is an
+    // important domain OR the row matches the keyword FTS query. Each clause is
+    // optional — only the ones the profile actually supplies are emitted.
+    const include: string[] = [];
+    const params: unknown[] = [account];
+
+    for (const { address } of importantAddrs) {
+      include.push(`(m.from_addr = ? OR lower(m.from_addr) LIKE ?)`);
+      params.push(address, `%<${address.toLowerCase()}>%`);
+    }
+    for (const { domain } of importantDomains) {
+      // Match the @domain suffix of the bare address or the bracketed header.
+      include.push(`(lower(m.from_addr) LIKE ? OR lower(m.from_addr) LIKE ?)`);
+      params.push(`%@${domain.toLowerCase()}`, `%@${domain.toLowerCase()}>%`);
+    }
+
+    // Keywords become an FTS subquery on the self-contained FTS table, so the
+    // keyword clause stays a simple `m.rowid IN (...)` against `messages_fts`.
+    let keywordClause: string | null = null;
+    if (keywords.length > 0) {
+      // OR-join the keywords into one FTS query (quote each term so a multi-word
+      // keyword is a phrase and punctuation can't break the query).
+      const ftsQuery = keywords.map((k) => `"${k.replace(/"/g, '""')}"`).join(' OR ');
+      keywordClause = `m.rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?)`;
+      // The keyword param is appended AFTER the important-entity params but
+      // BEFORE the exclusion params, matching the clause emission order below.
+      params.push(ftsQuery);
+      include.push(keywordClause);
+    }
+
+    // No inclusion clauses at all → the profile selects nothing. Return early so
+    // we never emit `WHERE ... AND ()` (which would match every meta row).
+    if (include.length === 0) return [];
+
+    const where: string[] = [`m.account = ?`, `m.body_state = 'meta'`, `(${include.join(' OR ')})`];
+
+    // EXCLUSION: muted/blocked sender or sender-domain dominates inclusion.
+    for (const { address } of mutedAddrs) {
+      where.push(`NOT (m.from_addr = ? OR lower(m.from_addr) LIKE ?)`);
+      params.push(address, `%<${address.toLowerCase()}>%`);
+    }
+    for (const { domain } of mutedDomains) {
+      where.push(`NOT (lower(m.from_addr) LIKE ? OR lower(m.from_addr) LIKE ?)`);
+      params.push(`%@${domain.toLowerCase()}`, `%@${domain.toLowerCase()}>%`);
+    }
+
+    let sql = `SELECT m.gmail_message_id AS id FROM messages m WHERE ${where.join(' AND ')} ORDER BY m.internal_date DESC`;
+    if (limit != null) {
+      sql += ` LIMIT ?`;
+      params.push(limit);
+    }
+
+    const rows = this.#prepare(sql).all(...(params as never[])) as { id: string }[];
+    return rows.map((r) => r.id);
+  }
+
   /** Count messages, optionally scoped to one account. */
   countMessages(account?: string): number {
     const row = account

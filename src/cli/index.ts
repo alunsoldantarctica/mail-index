@@ -28,6 +28,7 @@ import { formatShow, parseRef, runShow, RefError } from './show.js';
 import { formatOpen, runOpen } from './open.js';
 import { buildStatus, formatStatus, formatStatusJson } from './status.js';
 import { formatGraphResult, runGraphBuildAll, runGraphBuildOne } from './graph.js';
+import { formatCurate, readlinePrompter, runCurate } from './curate.js';
 
 const USAGE = `mail-index — a local, agent-queryable mail intelligence layer
 
@@ -38,6 +39,7 @@ Commands:
   init                          Scaffold the operator config + data dir
   sync    --account <label>     Sync message metadata for an account
   enrich  --account <label>     Fetch + distil bodies for selected messages (phase 2)
+  curate  [--account <label>]   Interactive curation wizard (no-agent fallback; D14)
   search  <terms>               Recall over the index (ranked, snippet-first)
   show    <account:message-id>  Print a message's full record (auto-enriches a meta row)
   open    <account:message-id>  Print the provider web URL for a message (no fetch)
@@ -72,10 +74,28 @@ Promotes matching meta messages to full: fetch the provider body, distil it
 
 Options:
   --account <label>   Account label from the operator config (required)
+  --profile           Enrich by the curated interest_profile policy (important→always,
+                      muted/blocked→never, keyword matches→yes); ignores --rule/--sender/--match
   --rule direct|all   direct = non-list, non-promo/social mail (default); all = every meta row
   --sender <addr>     Only messages from this address
   --match <fts>       Only meta messages matching this FTS query
   --limit N           Cap the number of messages enriched
+`;
+
+const CURATE_USAGE = `mail-index curate — interactive curation wizard (no-agent fallback)
+
+Usage:
+  mail-index curate [--account <label>] [--limit N]
+
+Walks the ranked curation shortlist (top contacts + domains by engagement) and
+takes a keep/mute/important/skip decision for each, then collects interest
+keywords. Persists the disposition (this is the enrichment policy, PLAN §7).
+INDEX-ONLY: reads the local index, never the provider. The agent-mediated MCP
+loop is the primary path (D14); this is the fallback for users with no agent.
+
+Options:
+  --account <label>   Account label from the operator config (default: the sole account)
+  --limit N           Cap the contacts AND domains walked (default 20 each)
 `;
 
 const SEARCH_USAGE = `mail-index search — ranked recall over the index
@@ -220,6 +240,7 @@ async function cmdEnrich(argv: string[]): Promise<number> {
     args: argv,
     options: {
       account: { type: 'string' },
+      profile: { type: 'boolean' },
       rule: { type: 'string' },
       sender: { type: 'string' },
       match: { type: 'string' },
@@ -241,12 +262,22 @@ async function cmdEnrich(argv: string[]): Promise<number> {
     throw new CliError(`--rule must be "direct" or "all", got "${values.rule}"`);
   }
 
-  const selector: EnrichSelector = {
-    ...(values.rule ? { rule: values.rule as 'direct' | 'all' } : {}),
-    ...(values.sender ? { sender: values.sender } : {}),
-    ...(values.match ? { match: values.match } : {}),
-    ...(parseLimit(values.limit, '--limit') != null ? { limit: parseLimit(values.limit, '--limit') } : {}),
-  };
+  // `--profile` resolves the candidate set from the curated interest_profile and
+  // ignores the heuristic selectors; flag the conflict rather than silently
+  // dropping --rule/--sender/--match.
+  if (values.profile && (values.rule != null || values.sender != null || values.match != null)) {
+    throw new CliError('--profile cannot be combined with --rule/--sender/--match (the profile IS the policy)');
+  }
+
+  const limit = parseLimit(values.limit, '--limit');
+  const selector: EnrichSelector = values.profile
+    ? { profile: true, ...(limit != null ? { limit } : {}) }
+    : {
+        ...(values.rule ? { rule: values.rule as 'direct' | 'all' } : {}),
+        ...(values.sender ? { sender: values.sender } : {}),
+        ...(values.match ? { match: values.match } : {}),
+        ...(limit != null ? { limit } : {}),
+      };
 
   const config = loadConfig();
   const account = resolveAccount(config, values.account);
@@ -259,6 +290,57 @@ async function cmdEnrich(argv: string[]): Promise<number> {
     process.stdout.write(`${result.account}: fetched ${result.fetched}, enriched ${result.enriched}${sel}\n`);
     return 0;
   } finally {
+    db.close();
+  }
+}
+
+async function cmdCurate(argv: string[]): Promise<number> {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      account: { type: 'string' },
+      limit: { type: 'string' },
+      help: { type: 'boolean' },
+    },
+    allowPositionals: false,
+  });
+
+  if (values.help) {
+    process.stdout.write(CURATE_USAGE);
+    return 0;
+  }
+
+  // INDEX-ONLY (PLAN §4): the wizard needs the account LABEL (to scope the
+  // index), not an adapter binding — but loadConfig is still the source of
+  // truth for which accounts exist. Default to the sole configured account when
+  // `--account` is omitted; require it when there is ambiguity.
+  const config = loadConfig();
+  const labels = Object.keys(config.accounts);
+  let account = values.account;
+  if (account == null) {
+    if (labels.length === 1) {
+      account = labels[0]!;
+    } else if (labels.length === 0) {
+      throw new CliError('no accounts configured — run mail-index init and edit the config');
+    } else {
+      throw new CliError(`curate requires --account <label> (configured: ${labels.join(', ')})`);
+    }
+  }
+  // Validate the label exists (throws ConfigError otherwise).
+  resolveAccount(config, account);
+
+  const limit = parseLimit(values.limit, '--limit');
+  const db = openDb();
+  const prompter = readlinePrompter();
+  try {
+    const repo = new Repo(db);
+    const result = await runCurate(repo, account, prompter, {
+      ...(limit != null ? { contactLimit: limit, domainLimit: limit } : {}),
+    });
+    process.stdout.write(formatCurate(result));
+    return 0;
+  } finally {
+    prompter.close();
     db.close();
   }
 }
@@ -473,6 +555,8 @@ async function main(argv: string[]): Promise<number> {
       return cmdSync(rest);
     case 'enrich':
       return cmdEnrich(rest);
+    case 'curate':
+      return cmdCurate(rest);
     case 'search':
       return cmdSearch(rest);
     case 'show':
