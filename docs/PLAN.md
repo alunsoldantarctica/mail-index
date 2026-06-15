@@ -16,12 +16,25 @@ prototype into a proper, repeatable, open-source tool.
 
 AI agents have no memory of a user's mailbox. Gmail's own search is weak, and
 handing an agent raw IMAP/API access is both a privacy hazard and useless at
-scale — you can't put 200k messages in a context window. What an agent actually
-needs is a **local, queryable index** that knows:
+scale — you can't put 200k messages in a context window.
+
+Existing Gmail/Google MCPs don't fix this, because they are **query-based and
+exact**: the agent must already know precisely what it's looking for
+(`from:x subject:y after:z`), every call is a slow remote round-trip, and a
+miss returns nothing — no ranking, no neighbors, no structure to orient by.
+They answer "fetch me this exact thing" but fail at how people actually ask:
+*"what did we agree about the deposit?"*, *"who was that contact from last
+spring?"* **Query-based MCPs answer exact queries; an agent needs to answer
+vague questions.**
+
+What an agent actually needs is a **local, queryable index** that supports
+*recall*, not just lookup:
 
 - who this person hears from, and who they actually *engage* with;
 - what threads and topics matter to them;
-- the full text of the messages worth reading, and only those.
+- the full text of the messages worth reading, and only those;
+- fuzzy, ranked, instant search — so a half-remembered detail still finds the
+  message, and exploring three angles on a vague question costs nothing.
 
 `mail-index` is that layer. It is **local-first** (the index never leaves the
 machine), **progressive** (cheap metadata for everything, expensive bodies only
@@ -191,6 +204,8 @@ domains
   account, domain TEXT      -- PK; rollup of contacts
   msgs, distinct_contacts INTEGER, engagement_score REAL
   curation TEXT
+  category TEXT             -- agent-assigned entity category (write-back loop)
+  category_note TEXT, categorized_at TEXT
 
 threads
   account, thread_id TEXT   -- PK
@@ -316,23 +331,53 @@ v1 curates **contacts, domains, and freeform interest keywords** — no clusteri
 
 ## 12. MCP server surface
 
-`mail-index-mcp` (stdio). Proposed tools (read-only on the mailbox; all
-operate on the local index):
+`mail-index-mcp` (stdio). Agreed v1 surface (see ADR-0001/0003/0004 and
+CONTEXT.md). Read-only on the mailbox; inline provider fetches are O(1) only —
+anything O(N) returns a **command handback** (the exact `mail-index` CLI
+command the agent runs itself).
 
-- `search(query, account?, limit?, enrich?)` — FTS over subject/sender/body;
-  optional lazy body-fetch of hits.
-- `get_message(ref)` — full record; auto-enriches body if still `meta`.
+**Primitives:**
+- `search(query, account?, limit?)` — ranked FTS over subject/sender/snippet/
+  body/summaries; snippet-first, compact result shapes.
+- `get_message(ref, level?)` — summary → distilled body → inline-enriches if
+  still `meta` (one O(1) fetch).
+- `get_thread(ref)` — thread metadata + messages + thread summary if present.
 - `list_contacts(sort?, filter?, limit?)` — by engagement/volume/recency/community.
 - `get_contact(address)` — stats, curation, recent threads.
+- `find_person(hint)` — fuzzy contact resolution from a vague hint (name
+  fragment, domain, time period, context) — the entry point for "who was that
+  insurance contact from last spring?". Ranks **Correspondents** (contacts the
+  user has written to) first: people remember by who they talked to. `search`
+  likewise boosts user-participated threads.
 - `list_threads(contact?|query?)` — conversations.
 - `graph_neighbors(address)` / `graph_communities()` — derived graph queries.
 - `interest_propose()` / `interest_set(selections)` / `interest_get()` — curation.
-- `sync_status()` — counts, last run, meta/full split (no mailbox mutation).
+- `save_summary(ref, text)` — write-back of an agent-authored summary at
+  message or thread level (ADR-0003); provenance-marked, FTS-indexed.
+- `domains_to_categorize(filter?)` / `save_domain_category(domain, category,
+  note?)` — user-triggered categorization of entities/companies with
+  back-and-forth communication: the tool extracts candidate domains (those
+  with Correspondent contacts) plus sample senders/subjects as context, the
+  agent's LLM assigns a category (client, vendor, travel operator, finance,
+  publisher, …), and the result is saved back onto `domains.category`.
+  Categories become filters/grouping across contact, search, and graph tools.
+- `sync_status()` — counts, last run, meta/full/summary-only split, freshness.
 
-Write-to-mailbox tools are **out of scope** by design (D15). Sync/enrich are CLI
-operations (potentially long-running); the MCP server may expose a
-`request_enrich(selector)` that the CLI/daemon services, but never blocks an
-agent call on a multi-minute fetch.
+**Use-case composites** (SQL views over the index):
+- `catch_up(since, account?)` — the "what did I miss" briefing feed: new mail
+  from curated-important contacts, new replies in user-participated threads,
+  interest-keyword hits; compact rows + handbacks for anything needing bodies.
+  If the index is stale, returns current data immediately AND spawns a
+  detached incremental sync (ADR-0005); same for `digest_sources`.
+- `digest_sources(since?, account?)` — newsletter/list senders ranked by
+  engagement + interest match, with unread/unsummarized issue counts. Digest
+  routine loop: `digest_sources` → `get_message` per issue → `save_summary` →
+  compose digest → bodies demote (ADR-0003).
+
+Write-to-mailbox tools are **out of scope** by design (D15). Sync/enrich are
+CLI operations; the MCP never blocks an agent call on a multi-minute fetch —
+it hands back the command instead (ADR-0001 supersedes the earlier
+`request_enrich` queue idea).
 
 ---
 
@@ -346,10 +391,11 @@ mail-index enrich --account <a> [--rule direct|all] [--sender <s>] [--match <fts
 mail-index enrich --profile                      # enrich per curated interest_profile
 mail-index graph  build [--account <a>]
 mail-index curate [--account <a>]                # interactive wizard (fallback)
+mail-index compact [--now] [--account <a>]       # demote summary-eligible bodies (ADR-0003)
 mail-index search <terms> [--account <a>] [--limit N] [--enrich]
 mail-index show   <account:message-id>           # lazy body-fetch
 mail-index open   <account:message-id>           # print provider web URL
-mail-index status
+mail-index status [--json]                       # machine-readable for tray/scheduler use
 mail-index mcp                                    # = mail-index-mcp (server)
 ```
 
@@ -438,6 +484,8 @@ mail-index/
 - Graph engine (Graphology, D8–D10).
 - Curation: MCP tools + CLI wizard (D14); profile-driven enrichment.
 - MCP server with the §12 surface. INSTALL/MCP/ADAPTERS docs.
+- `status --json` + documented launchd/cron snippet in INSTALL.md (scheduled
+  freshness; ADR-0005 lazy syncs become the fallback, not the main path).
 
 **v1.1 — depth.**
 - **Topics** — start cheap (subject-keyword + sender-derived tags), *then*
@@ -450,6 +498,11 @@ mail-index/
 - Second adapter: **DirectGmailAdapter** (bundled published OAuth app → no gcloud/
   GCP project for adopters) — the real onboarding-friction killer (D1).
 - Single-binary distribution (Bun `--compile` / Node SEA, D4).
+- `mail-index schedule install --interval 30m` (generates launchd plist /
+  systemd user timer) + SwiftBar/xbar tray plugin in `contrib/` (menu-bar
+  freshness, "Sync now"). A real Tauri tray app only if demand, as a
+  companion repo.
+- MCP sync-status resource + `resources/updated` subscription push (ADR-0005).
 - Optional: IMAP adapter; MCP elicitation once client support is real.
 
 **v2 — research.** Literal node/edge graph + richer community/topic modeling;

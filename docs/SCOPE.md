@@ -1,6 +1,9 @@
 # mail-index — Development Scope (v0.x → v1.0)
 
-Derived from [PLAN.md](PLAN.md). Status: draft for review.
+Derived from [PLAN.md](PLAN.md). Status: filed in Linear (team UNS,
+2026-06-10): **M0 = UNS-1207** (subs 1208–1214), **M1 = UNS-1215** (subs
+1216–1219), **M2 = UNS-1220** (subs 1221–1223), **M3 = UNS-1224** (subs
+1225–1231).
 
 Baseline: 493-line single-file prototype (`~/bin/mail-index`, CJS) that already
 proves two-phase sync, classification, FTS5 search, show/open/status — but
@@ -50,8 +53,10 @@ Everything else stacks on this.
 | 3.1 | **Curation core** (`src/curation/`) | `interest_profile` persistence; propose() shortlist generator; set() applying contact/domain curation + keywords. |
 | 3.2 | **Profile-driven enrichment** | `enrich --profile`: important→always, muted→never, keyword FTS matches→yes. |
 | 3.3 | **CLI curate wizard** | Minimal interactive fallback (D14). |
-| 3.4 | **MCP server** (`src/mcp/`) | stdio, `@modelcontextprotocol/sdk`; PLAN §12 tool surface; golden-response tests against seeded fixture DB. Decide `request_enrich` semantics (queue vs reject) — leaning: enqueue a request row the CLI services, never block. |
-| 3.5 | **Docs** | INSTALL.md (placeholders), MCP.md (tool reference), ADAPTERS.md (contract + how to write one). README refresh. |
+| 3.4 | **MCP server** (`src/mcp/`) | stdio, `@modelcontextprotocol/sdk`; PLAN §12 tool surface; golden-response tests against seeded fixture DB. Decide `request_enrich` semantics (queue vs reject) — leaning: enqueue a request row the CLI services, never block. **Design tests:** (a) *recall, not lookup* — every tool must work from a vague starting point (fuzzy ranked FTS, entity entry points by contact/domain, near-misses return ranked neighbors, never a bare empty set), not just an exact key; this is the differentiator vs query-based Gmail MCPs. (b) *token-budget-conscious by default* — compact result shapes, snippet-first, explicit opt-in for full bodies, sensible default limits. |
+| 3.5 | **Write-back loops** (ADR-0003/0004) | `save_summary` (message + thread), summary columns + FTS, demotion eligibility, `compact` command with grace window (sync auto-invokes); `domains_to_categorize` / `save_domain_category` + `domains.category`. |
+| 3.6 | **Freshness + background sync** (ADR-0005) | `index_as_of` on every response; stale time-sensitive tools return immediately + spawn detached incremental sync; `sync_started`/`eta_seconds` feedback contract; WAL mode; sync lock + debounce. `status --json` + INSTALL cron/launchd snippet. |
+| 3.7 | **Docs** | INSTALL.md (placeholders), MCP.md (tool reference), ADAPTERS.md (contract + how to write one). README refresh. |
 
 ## Explicitly out of scope (deferred per PLAN §18)
 
@@ -60,16 +65,23 @@ single-binary, IMAP, daemon, MCP elicitation (v1.x) · Rust (v2).
 
 ---
 
-## Design gaps the plan leaves open (need decisions before/at the affected milestone)
+## Decisions (resolved 2026-06-10)
 
-1. **Operator account config format** (blocks 0.4) — proposal:
+1. **Operator account config: JSON file** —
    `~/.config/mail-index/config.json` → `{ accounts: { "<label>": { adapter: "gws", configDir: "...", syncPolicy: {...} } } }`.
-2. **Prototype DB migration vs fresh re-sync** (blocks 0.2) — leaning fresh
-   re-sync; metadata sync is minutes, migration code is throwaway.
-3. **CLI framework** — bare `node:util` parseArgs vs commander/citty. Leaning
-   minimal (parseArgs) per the no-deps spirit of D2.
-4. **`request_enrich` execution model** (blocks 3.4) — PLAN §20 leans CLI-first.
-5. PLAN §20 carry-overs: name, license confirm (MIT), public-at-v1.0.
+   Scaffolded by `init`; never committed; the tool ships only the schema +
+   placeholder example.
+2. **Prototype DB: fresh re-sync.** No migration code; metadata sync is
+   minutes. Keep the prototype DB on disk until the new tool reaches parity.
+3. **CLI parsing: `node:util` parseArgs** — zero deps, hand-rolled subcommand
+   routing, per the no-friction spirit of D2.
+4. **Linear issues: not yet.** Iterate SCOPE.md first; file issues in a later
+   session (M0-only filing preferred at that point).
+
+## Still open (decide at the affected milestone)
+
+- **`request_enrich` execution model** (blocks 3.4) — PLAN §20 leans CLI-first.
+- PLAN §20 carry-overs: name, license confirm (MIT), public-at-v1.0.
 
 ## Suggested sequencing
 

@@ -1,0 +1,108 @@
+# mail-index
+
+A local, agent-queryable mail intelligence layer: progressive index over one or
+more mailboxes, exposed to AI agents through a local MCP server. Built for
+*recall* (answering vague questions), not lookup.
+
+## Language
+
+**Message**:
+One mail item in the index, namespaced by (account, provider message id).
+_Avoid_: email, mail item
+
+**Body state**:
+Where a Message sits on the compaction ladder: **meta** (headers + snippet),
+**full** (distilled body text, FTS-indexed), or **summary-only** (body demoted
+after summarization, ADR-0003). Raw provider bytes are never persisted.
+
+**Enrichment**:
+Promoting a Message from meta to full by fetching its body from the provider.
+The fetched body is always stored **distilled** (HTML stripped; quoted history,
+signatures, footers, tracking junk removed).
+_Avoid_: hydration, body sync
+
+**Summary**:
+An agent-written digest of a Message or Thread, saved into the index via
+`save_summary`, provenance-marked as model-generated, FTS-indexed.
+
+**Demotion**:
+Dropping a distilled body once its Summary exists — the end state for bulk
+(`is_list`) and non-curated mail. Never applied to curated-important contacts
+or user-participated Threads. Runs via `compact` after a grace window (default
+7 days), auto-invoked by sync. Safe because of the Working set principle.
+
+**Working set**:
+The index is a working set + knowledge layer, not an archive — the provider
+remains the archive, so demotion/eviction is never data loss; anything can be
+re-enriched by id.
+
+**Inline enrichment**:
+A single-message (O(1)) enrichment performed during an MCP tool call. O(N)
+enrichment is never inline — the tool returns a Command handback (ADR-0001).
+
+**Command handback**:
+An MCP tool response containing the exact `mail-index` CLI command the agent
+should run to obtain content the server won't fetch inline. The CLI is the
+execution engine; the MCP is the brain that knows which command to run.
+
+**Read-only**:
+The tool never mutates the mailbox (no send, label, archive, delete). Fetching
+message content is permitted — read-only does not mean offline.
+
+**Interest profile**:
+The user-curated policy (important/muted contacts and domains + freeform
+keywords) that drives which bodies get enriched. Curation output, enrichment
+input.
+
+**Engagement score**:
+A derived per-contact score from read/reply/star/importance signals. A *seed*
+for curation, never an autonomous fetch trigger.
+
+**Write-back loop**:
+The canonical pattern for anything language-shaped: the index *proposes* (a
+deterministic shortlist with context), the user's LLM *judges* via MCP, and a
+write-back tool *persists* the result with model-generated provenance.
+Instances: interest curation, summarization, domain categorization.
+
+**Entity category**:
+An agent-assigned label on a Domain with back-and-forth communication (client,
+vendor, travel operator, finance, publisher, …). User-triggered via the
+write-back loop; used as a filter/grouping axis across contact, search, and
+graph tools.
+
+**Recall**:
+Retrieval from a vague starting point — fuzzy ranked search, entity entry
+points, ranked neighbors on a miss. The differentiator vs query-based
+(exact-lookup) mail MCPs.
+
+**Correspondent**:
+A Contact the user has ever sent mail to (`msgs_sent > 0`, from the Sent
+index). The sharpest human-vs-noise separator; exposed as a filter/tag on
+contact tools and weighted strongly by the Engagement score.
+_Avoid_: "real contact", "human sender"
+
+**Account**:
+An operator-defined label mapping to one mailbox + adapter config. Lives in
+operator config, never in the repo.
+
+## Relationships
+
+- The **Interest profile** selects which **Messages** get **Enrichment**.
+- The **Engagement score** proposes; curation into the **Interest profile**
+  disposes.
+- Every **Message**, **Contact**, and **Thread** belongs to exactly one
+  **Account**.
+- A **Correspondent** is a **Contact** with at least one user-sent Message;
+  bulk senders are never Correspondents unless the user has written to them.
+
+## Example dialogue
+
+> **Dev:** "The agent asked for a message that's still **meta** — do we block
+> while we fetch the whole thread?"
+> **Domain expert:** "No — **inline enrichment** is one message, one fetch.
+> If the agent wants the whole thread's bodies, that's O(N): enqueue it."
+
+## Flagged ambiguities
+
+- "read-only" was used to mean both "never mutates" and "never touches the
+  network" — resolved: it means never mutates; bounded fetching is allowed.
