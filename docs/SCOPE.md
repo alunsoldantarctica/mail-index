@@ -13,11 +13,19 @@ engine, no curation, no MCP.
 
 ---
 
-## Milestone 0 — Tracer bullet (vertical slice)
+## Milestone 0 — Tracer bullet (vertical slice) ✅ SHIPPED 2026-06-15
 
 Goal: `npx mail-index sync --account X && mail-index search "foo"` works
 end-to-end in the new layered TS codebase, for one account, with tests.
 Everything else stacks on this.
+
+**Done.** Commits `1ce2473..ff0b5e2` on main; 120 tests pass, build + lint
+clean; cold-review verdict *solid*. Verified live against real Gmail (synced 5
+personal messages, FTS search + `status --json` confirmed). New ADR-0006
+(self-contained FTS5). Carry-over for M1: `openDb` should detect a pre-existing
+**unversioned** DB (old prototype at the shared path) and emit a clear error
+instead of the raw `table messages already exists` (the prototype DB is now at
+`mail.sqlite.prototype-bak`).
 
 | # | Work item | Notes / acceptance |
 |---|---|---|
