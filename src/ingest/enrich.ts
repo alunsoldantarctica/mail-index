@@ -88,6 +88,106 @@ function describeSelector(selector: EnrichSelector): string {
 }
 
 /**
+ * Promote one already-known id to `full`: fetch its full record, distil the
+ * body, and upsert at `body_state='full'` with the distilled `body_text`. The
+ * single shared step both the bulk {@link enrich} loop and the O(1) inline
+ * {@link enrichOne} drive, so the fetch→distil→upsert path (and its metadata
+ * preservation) lives in exactly one place.
+ *
+ * Returns `true` when the row was promoted, `false` when the provider can no
+ * longer return the id (`getFull` → null) and the meta row was left as-is. The
+ * repo's no-downgrade invariant + FTS lockstep are enforced by `upsertMessage`;
+ * an id already at `full`/`summary-only` is harmlessly refreshed/held by it.
+ */
+async function promoteOne(account: string, id: string, source: MailSource, repo: Repo): Promise<boolean> {
+  const full = await source.getFull(id);
+  if (!full) return false; // gone from the provider — leave the meta row as-is.
+
+  const bodyText = distill({
+    bodyText: full.bodyText,
+    bodyHtml: full.bodyHtml,
+    mimeType: full.mimeType,
+  });
+
+  // Promote to full. The repo's upsert overwrites every metadata column from
+  // the input (ON CONFLICT DO UPDATE SET …), so we re-supply the full metadata
+  // the provider just returned rather than a sparse {id, bodyText} — otherwise
+  // the existing subject/sender/labels/etc. would be nulled out. Classification
+  // fields (category/is_list/direction) and snapshot flags are already correct
+  // on the row from phase 1, so we carry the existing row's values forward to
+  // stay provider-neutral and avoid re-running classification here.
+  const existing = repo.getMessage(account, id);
+  repo.upsertMessage({
+    account,
+    gmailMessageId: id,
+    threadId: full.threadId,
+    internalDate: full.internalDate,
+    dateHeader: full.dateHeader,
+    fromAddr: full.from,
+    toAddr: full.to,
+    ccAddr: full.cc,
+    subject: full.subject,
+    labels: full.labels,
+    category: existing?.category ?? null,
+    isList: existing ? existing.is_list === 1 : false,
+    direction: existing?.direction ?? 'received',
+    unread: existing ? existing.unread === 1 : false,
+    starred: existing ? existing.starred === 1 : false,
+    important: existing ? existing.important === 1 : false,
+    sizeEstimate: full.sizeEstimate,
+    snippet: full.snippet,
+    bodyState: 'full',
+    bodyText,
+  });
+  return true;
+}
+
+/** Options for {@link enrichOne}. */
+export interface EnrichOneOptions {
+  /** The account label the message belongs to. */
+  account: string;
+  /** The id of the message to promote. */
+  id: string;
+  /** The provider adapter to fetch the full body from. */
+  source: MailSource;
+  /** The repo to read the existing row from and persist into. */
+  repo: Repo;
+}
+
+/**
+ * Lazily enrich a SINGLE message in place (SCOPE 1.2, ADR-0001 — the O(1)
+ * inline pattern). One bounded `getFull` → distil → upsert; no `sync_runs` row
+ * and no account lock, because a single bounded fetch is the very operation
+ * ADR-0001 permits inline ("answering what did that email say? mid-conversation
+ * is the product promise"). Used by `show <ref>` to auto-enrich a `meta` row
+ * before printing, and per-hit by `search --enrich`.
+ *
+ * Idempotent and no-downgrade-safe: an id already at `full`/`summary-only` is
+ * left at its higher state by the repo, and a missing id is skipped. Returns
+ * whether a fetch + promotion actually occurred.
+ */
+export async function enrichOne(options: EnrichOneOptions): Promise<boolean> {
+  const { account, id, source, repo } = options;
+  if (!account || account.trim() === '') {
+    throw new EnrichError('enrichOne requires a non-empty account label');
+  }
+  if (!id || id.trim() === '') {
+    throw new EnrichError('enrichOne requires a non-empty message id');
+  }
+  const existing = repo.getMessage(account, id);
+  // Already past meta — nothing to fetch (no-downgrade means a re-promotion
+  // would be a no-op anyway). Keep it O(0) in the common already-enriched case.
+  if (existing && existing.body_state !== 'meta') return false;
+  try {
+    return await promoteOne(account, id, source, repo);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (err instanceof EnrichError || err instanceof IndexError) throw err;
+    throw new EnrichError(`enrich failed for ${account}:${id}: ${message}`);
+  }
+}
+
+/**
  * Acquire the per-account lock by opening an `enrich` `sync_runs` row, refusing
  * if another run for the account is already in flight (ADR-0005), exactly like
  * phase-1 sync. Returns the new run's id.
@@ -149,48 +249,9 @@ export async function enrich(options: EnrichOptions): Promise<EnrichResult> {
     const ids = repo.selectMetaMessages(account, candidate);
 
     for (const id of ids) {
-      const full = await source.getFull(id);
-      if (!full) continue; // gone from the provider — leave the meta row as-is.
+      const promoted = await promoteOne(account, id, source, repo);
+      if (!promoted) continue; // gone from the provider — leave the meta row as-is.
       fetched += 1;
-
-      const bodyText = distill({
-        bodyText: full.bodyText,
-        bodyHtml: full.bodyHtml,
-        mimeType: full.mimeType,
-      });
-
-      // Promote to full. The repo's upsert overwrites every metadata column
-      // from the input (ON CONFLICT DO UPDATE SET …), so we re-supply the full
-      // metadata the provider just returned rather than a sparse {id, bodyText}
-      // — otherwise the existing subject/sender/labels/etc. would be nulled out.
-      // Classification fields (category/is_list/direction) are already correct on
-      // the row from phase 1 and are derivable from these same labels; we keep
-      // them stable by re-deriving from the returned labels via the same source
-      // headers. To stay provider-neutral and avoid re-running classification
-      // here, we carry forward the existing row's classification.
-      const existing = repo.getMessage(account, id);
-      repo.upsertMessage({
-        account,
-        gmailMessageId: id,
-        threadId: full.threadId,
-        internalDate: full.internalDate,
-        dateHeader: full.dateHeader,
-        fromAddr: full.from,
-        toAddr: full.to,
-        ccAddr: full.cc,
-        subject: full.subject,
-        labels: full.labels,
-        category: existing?.category ?? null,
-        isList: existing ? existing.is_list === 1 : false,
-        direction: existing?.direction ?? 'received',
-        unread: existing ? existing.unread === 1 : false,
-        starred: existing ? existing.starred === 1 : false,
-        important: existing ? existing.important === 1 : false,
-        sizeEstimate: full.sizeEstimate,
-        snippet: full.snippet,
-        bodyState: 'full',
-        bodyText,
-      });
       enriched += 1;
     }
 

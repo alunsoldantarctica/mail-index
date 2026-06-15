@@ -244,7 +244,7 @@ test('runInit scaffolds config from the example and is non-destructive', () => {
 test('bin: top-level usage and per-command help', () => {
   const usage = execFileSync('node', [cliBin], { encoding: 'utf8' });
   assert.match(usage, /Usage:/);
-  for (const cmd of ['sync', 'search', 'status']) {
+  for (const cmd of ['sync', 'search', 'show', 'status']) {
     const help = execFileSync('node', [cliBin, cmd, '--help'], { encoding: 'utf8' });
     assert.match(help, new RegExp(`mail-index ${cmd}`));
   }

@@ -22,7 +22,8 @@ import { SyncError } from '../ingest/sync.js';
 
 import { formatInit, runInit } from './init.js';
 import { formatSyncResult, runSyncOne, type SyncFlags } from './sync.js';
-import { formatResults, runSearch, type SearchFlags } from './search.js';
+import { formatResults, runSearchEnriching, type SearchFlags } from './search.js';
+import { formatShow, parseRef, runShow, RefError } from './show.js';
 import { buildStatus, formatStatus, formatStatusJson } from './status.js';
 
 const USAGE = `mail-index — a local, agent-queryable mail intelligence layer
@@ -34,6 +35,7 @@ Commands:
   init                          Scaffold the operator config + data dir
   sync    --account <label>     Sync message metadata for an account
   search  <terms>               Recall over the index (ranked, snippet-first)
+  show    <account:message-id>  Print a message's full record (auto-enriches a meta row)
   status                        Show per-account index freshness + counts
 
 Run 'mail-index <command> --help' for command-specific options.
@@ -57,11 +59,21 @@ Options:
 const SEARCH_USAGE = `mail-index search — ranked recall over the index
 
 Usage:
-  mail-index search <terms...> [--account <label>] [--limit N]
+  mail-index search <terms...> [--account <label>] [--limit N] [--enrich]
 
 Options:
   --account <label>   Restrict the search to one account
   --limit N           Maximum hits to return (default 20)
+  --enrich            Enrich the returned hits' bodies, then re-rank (CLI-only; see ADR-0001)
+`;
+
+const SHOW_USAGE = `mail-index show — print a message's full record
+
+Usage:
+  mail-index show <account:message-id>
+
+A still-meta message is auto-enriched first (one provider fetch → distil →
+upsert), then its distilled body is printed (the O(1) inline pattern, ADR-0001).
 `;
 
 const STATUS_USAGE = `mail-index status — per-account index freshness + counts
@@ -155,12 +167,13 @@ async function cmdSync(argv: string[]): Promise<number> {
   }
 }
 
-function cmdSearch(argv: string[]): number {
+async function cmdSearch(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
     args: argv,
     options: {
       account: { type: 'string' },
       limit: { type: 'string' },
+      enrich: { type: 'boolean' },
       help: { type: 'boolean' },
     },
     allowPositionals: true,
@@ -178,13 +191,52 @@ function cmdSearch(argv: string[]): number {
   const flags: SearchFlags = {
     account: values.account,
     limit: parseLimit(values.limit, '--limit'),
+    enrich: values.enrich,
   };
 
+  // `--enrich` reaches the provider, so it needs the operator config (account →
+  // adapter). A plain search never opens the config — pass an empty one, which
+  // runSearchEnriching ignores when `enrich` is unset (it returns plain hits).
+  const config = values.enrich ? loadConfig() : { accounts: {} };
   const db = openDb();
   try {
     const repo = new Repo(db);
-    const rows = runSearch(repo, positionals, flags);
+    const rows = await runSearchEnriching(config, repo, positionals, flags);
     process.stdout.write(formatResults(rows, positionals));
+    return 0;
+  } finally {
+    db.close();
+  }
+}
+
+async function cmdShow(argv: string[]): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: {
+      help: { type: 'boolean' },
+    },
+    allowPositionals: true,
+  });
+
+  if (values.help) {
+    process.stdout.write(SHOW_USAGE);
+    return 0;
+  }
+
+  if (positionals.length === 0) {
+    throw new CliError('show requires a <account:message-id> reference');
+  }
+  if (positionals.length > 1) {
+    throw new CliError('show takes a single <account:message-id> reference');
+  }
+
+  const ref = parseRef(positionals[0]!);
+  const config = loadConfig();
+  const db = openDb();
+  try {
+    const repo = new Repo(db);
+    const result = await runShow(config, repo, ref);
+    process.stdout.write(formatShow(result));
     return 0;
   } finally {
     db.close();
@@ -232,6 +284,8 @@ async function main(argv: string[]): Promise<number> {
       return cmdSync(rest);
     case 'search':
       return cmdSearch(rest);
+    case 'show':
+      return cmdShow(rest);
     case 'status':
       return cmdStatus(rest);
     default:
@@ -248,7 +302,8 @@ main(process.argv.slice(2))
       err instanceof ConfigError ||
       err instanceof IndexError ||
       err instanceof SyncError ||
-      err instanceof CliError
+      err instanceof CliError ||
+      err instanceof RefError
     ) {
       process.stderr.write(`error: ${err.message}\n`);
     } else if (err instanceof Error) {
