@@ -1,0 +1,21 @@
+{
+  "accounts": {
+    "acct-a": {
+      "adapter": "gws",
+      "configDir": "~/.config/gws-acct-a",
+      "syncPolicy": {
+        "since": "1mo",
+        "includeSent": true
+      }
+    },
+    "acct-b": {
+      "adapter": "gws",
+      "configDir": "~/.config/gws-acct-b",
+      "syncPolicy": {
+        "query": "from:you@example.com",
+        "limit": 5000,
+        "includeSent": false
+      }
+    }
+  }
+}
