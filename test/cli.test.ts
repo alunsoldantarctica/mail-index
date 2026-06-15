@@ -14,7 +14,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, existsSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -244,7 +244,7 @@ test('runInit scaffolds config from the example and is non-destructive', () => {
 test('bin: top-level usage and per-command help', () => {
   const usage = execFileSync('node', [cliBin], { encoding: 'utf8' });
   assert.match(usage, /Usage:/);
-  for (const cmd of ['sync', 'search', 'show', 'status']) {
+  for (const cmd of ['sync', 'search', 'show', 'open', 'status']) {
     const help = execFileSync('node', [cliBin, cmd, '--help'], { encoding: 'utf8' });
     assert.match(help, new RegExp(`mail-index ${cmd}`));
   }
@@ -275,6 +275,22 @@ test('bin: search over a seeded tmp db prints a ranked hit', () => {
   });
   assert.match(out, /acct-a:m1/);
   assert.match(out, /Antarctica charter/);
+});
+
+test('bin: open prints the provider URL for a ref (no provider fetch)', () => {
+  const dir = tmp('mi-cli-');
+  // A config dir with the shipped example config (has account "acct-a").
+  const cfgHome = join(dir, 'config');
+  mkdirSync(join(cfgHome, 'mail-index'), { recursive: true });
+  cpSync(exampleConfig, join(cfgHome, 'mail-index', 'config.json'));
+  // A data dir so the (lazily-opened) index resolves to a tmp path.
+  mkdirSync(join(dir, 'mail-index'), { recursive: true });
+
+  const out = execFileSync('node', [cliBin, 'open', 'acct-a:18f0a1b2c3'], {
+    encoding: 'utf8',
+    env: { ...process.env, XDG_CONFIG_HOME: cfgHome, XDG_DATA_HOME: dir },
+  });
+  assert.equal(out.trim(), 'https://mail.google.com/mail/u/0/#all/18f0a1b2c3');
 });
 
 test('bin: status --json over a seeded tmp db is machine-readable', () => {

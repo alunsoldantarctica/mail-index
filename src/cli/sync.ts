@@ -94,3 +94,41 @@ export function formatSyncResult(result: SyncResult): string {
   const scope = result.selector ? ` (${result.selector})` : ' (whole mailbox)';
   return `${result.account}: fetched ${result.fetched}, indexed ${result.indexed}${scope}`;
 }
+
+/** One account's outcome in an all-accounts sweep (success or isolated failure). */
+export interface AccountSyncOutcome {
+  account: string;
+  /** The completed run, when the account synced successfully. */
+  result?: SyncResult;
+  /** The failure message, when this account's sweep failed (others continue). */
+  error?: string;
+}
+
+/**
+ * Run phase-1 sync for *every* configured account (SCOPE 1.3, PLAN §15), each
+ * using its own stored `syncPolicy` preset overlaid with the shared CLI
+ * `flags`. Each account is an independent sweep — its own `sync_runs` row + the
+ * per-account lock (enforced down in {@link syncMetadata}) — so one account's
+ * failure is captured as an {@link AccountSyncOutcome} error and does NOT abort
+ * the rest. Returns one outcome per account, in config order.
+ *
+ * The loop body reuses {@link runSyncOne}; `buildSourceFn` is threaded through
+ * so tests can wire fake sources per account without a live provider.
+ */
+export async function runSyncAll(
+  config: OperatorConfig,
+  flags: SyncFlags,
+  repo: Repo,
+  buildSourceFn: (account: AccountConfig) => MailSource = buildSource,
+): Promise<AccountSyncOutcome[]> {
+  const outcomes: AccountSyncOutcome[] = [];
+  for (const label of Object.keys(config.accounts)) {
+    try {
+      const result = await runSyncOne(config, label, flags, repo, buildSourceFn);
+      outcomes.push({ account: label, result });
+    } catch (err) {
+      outcomes.push({ account: label, error: (err as Error).message });
+    }
+  }
+  return outcomes;
+}

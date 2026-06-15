@@ -356,6 +356,19 @@ export class Repo {
   }
 
   /**
+   * Fetch a message's stored provider URL (`gmail_url`), or null when the row is
+   * absent or carries no stored URL. Used by `open` to prefer a recorded
+   * provider permalink over a constructed deep link. Kept separate from
+   * {@link getMessage} so `open` stays a single, cheap column read.
+   */
+  getMessageUrl(account: string, gmailMessageId: string): string | null {
+    const row = this.#prepare(
+      `SELECT gmail_url FROM messages WHERE account = ? AND gmail_message_id = ?`,
+    ).get(account, gmailMessageId) as { gmail_url: string | null } | undefined;
+    return row?.gmail_url ?? null;
+  }
+
+  /**
    * FTS search returning matching message rows ranked by bm25. `query` is raw
    * FTS5 syntax. Optionally scoped to one account.
    */

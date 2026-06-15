@@ -21,9 +21,10 @@ import { Repo } from '../index/repo.js';
 import { SyncError } from '../ingest/sync.js';
 
 import { formatInit, runInit } from './init.js';
-import { formatSyncResult, runSyncOne, type SyncFlags } from './sync.js';
+import { formatSyncResult, runSyncAll, runSyncOne, type SyncFlags } from './sync.js';
 import { formatResults, runSearchEnriching, type SearchFlags } from './search.js';
 import { formatShow, parseRef, runShow, RefError } from './show.js';
+import { formatOpen, runOpen } from './open.js';
 import { buildStatus, formatStatus, formatStatusJson } from './status.js';
 
 const USAGE = `mail-index — a local, agent-queryable mail intelligence layer
@@ -36,6 +37,7 @@ Commands:
   sync    --account <label>     Sync message metadata for an account
   search  <terms>               Recall over the index (ranked, snippet-first)
   show    <account:message-id>  Print a message's full record (auto-enriches a meta row)
+  open    <account:message-id>  Print the provider web URL for a message (no fetch)
   status                        Show per-account index freshness + counts
 
 Run 'mail-index <command> --help' for command-specific options.
@@ -74,6 +76,17 @@ Usage:
 
 A still-meta message is auto-enriched first (one provider fetch → distil →
 upsert), then its distilled body is printed (the O(1) inline pattern, ADR-0001).
+`;
+
+const OPEN_USAGE = `mail-index open — print a message's provider web URL
+
+Usage:
+  mail-index open <account:message-id>
+
+Resolves the ref to its provider deep link (Gmail #all view for gws) and prints
+the URL. Does not fetch the message or touch the provider — it only needs the
+account's adapter and the message id, so it works even before the message is
+indexed.
 `;
 
 const STATUS_USAGE = `mail-index status — per-account index freshness + counts
@@ -139,18 +152,17 @@ async function cmdSync(argv: string[]): Promise<number> {
     const repo = new Repo(db);
 
     if (values['all-accounts']) {
-      const labels = Object.keys(config.accounts);
-      if (labels.length === 0) {
+      if (Object.keys(config.accounts).length === 0) {
         throw new CliError('no accounts configured — run mail-index init and edit the config');
       }
+      const outcomes = await runSyncAll(config, flags, repo);
       let failures = 0;
-      for (const label of labels) {
-        try {
-          const result = await runSyncOne(config, label, flags, repo);
-          process.stdout.write(formatSyncResult(result) + '\n');
-        } catch (err) {
+      for (const outcome of outcomes) {
+        if (outcome.result) {
+          process.stdout.write(formatSyncResult(outcome.result) + '\n');
+        } else {
           failures += 1;
-          process.stderr.write(`${label}: sync failed — ${(err as Error).message}\n`);
+          process.stderr.write(`${outcome.account}: sync failed — ${outcome.error}\n`);
         }
       }
       return failures > 0 ? 1 : 0;
@@ -243,6 +255,40 @@ async function cmdShow(argv: string[]): Promise<number> {
   }
 }
 
+function cmdOpen(argv: string[]): number {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: {
+      help: { type: 'boolean' },
+    },
+    allowPositionals: true,
+  });
+
+  if (values.help) {
+    process.stdout.write(OPEN_USAGE);
+    return 0;
+  }
+
+  if (positionals.length === 0) {
+    throw new CliError('open requires a <account:message-id> reference');
+  }
+  if (positionals.length > 1) {
+    throw new CliError('open takes a single <account:message-id> reference');
+  }
+
+  const ref = parseRef(positionals[0]!);
+  const config = loadConfig();
+  const db = openDb();
+  try {
+    const repo = new Repo(db);
+    const result = runOpen(config, repo, ref);
+    process.stdout.write(formatOpen(result));
+    return 0;
+  } finally {
+    db.close();
+  }
+}
+
 function cmdStatus(argv: string[]): number {
   const { values } = parseArgs({
     args: argv,
@@ -286,6 +332,8 @@ async function main(argv: string[]): Promise<number> {
       return cmdSearch(rest);
     case 'show':
       return cmdShow(rest);
+    case 'open':
+      return cmdOpen(rest);
     case 'status':
       return cmdStatus(rest);
     default:
