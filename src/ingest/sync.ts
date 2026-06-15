@@ -29,6 +29,7 @@ import type { MailScope, MailSource } from '../source/index.js';
 import type { Repo } from '../index/repo.js';
 import { IndexError } from '../index/db.js';
 import { classifyMessage } from './classify.js';
+import { aggregateAccount } from '../intelligence/aggregate.js';
 
 /** Error thrown when a sync cannot start or run (lock contention, etc.). */
 export class SyncError extends Error {
@@ -51,6 +52,14 @@ export interface SyncOptions {
    * we hand the adapter at once. Defaults to 50.
    */
   batchSize?: number;
+  /**
+   * Whether to run the derived contact/domain/thread aggregation pass (M2.1)
+   * after the metadata sweep. Defaults to `true`: aggregation is cheap,
+   * INDEX-ONLY (PLAN §4), and idempotent, so a sync leaves the derived tables
+   * current. Set `false` to sweep without rebuilding aggregates (e.g. when a
+   * caller batches many syncs and aggregates once at the end).
+   */
+  aggregate?: boolean;
 }
 
 /** Outcome of a completed (or failed-then-recorded) sync run. */
@@ -203,6 +212,15 @@ export async function syncMetadata(options: SyncOptions): Promise<SyncResult> {
     }
     if (err instanceof SyncError || err instanceof IndexError) throw err;
     throw new SyncError(`sync failed for account "${account}": ${message}`);
+  }
+
+  // Derived, INDEX-ONLY aggregation (M2.1, PLAN §4): roll the now-current
+  // messages up into contacts/domains/threads. Runs after the audit row is
+  // closed (lock released) since it touches only the derived tables. Idempotent
+  // — safe on every sync. The probed own-address(es) keep the user out of their
+  // own contact list and feed Correspondent detection on Sent mail (D11).
+  if (options.aggregate !== false) {
+    aggregateAccount(repo, account, knownAddresses);
   }
 
   return { runId, account, fetched, indexed, selector };

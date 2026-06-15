@@ -9,6 +9,13 @@ export type {
   DomainCategoryInput,
   SyncRunStart,
   SyncRunFinish,
+  AggregationMessageRow,
+  ContactAggregate,
+  DomainAggregate,
+  ThreadAggregate,
+  ContactRow,
+  DomainRow,
+  ThreadRow,
 } from './repo.js';
 export {
   SCHEMA_VERSION,

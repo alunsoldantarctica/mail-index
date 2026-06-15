@@ -129,6 +129,104 @@ export interface DomainCategoryInput {
   note?: string | null;
 }
 
+/**
+ * The message projection {@link Repo.messagesForAggregation} streams to the
+ * aggregation pass. Snake_case rows straight from SQLite (repo convention).
+ */
+export interface AggregationMessageRow {
+  account: string;
+  gmail_message_id: string;
+  thread_id: string | null;
+  internal_date: number | null;
+  date_header: string | null;
+  from_addr: string | null;
+  to_addr: string | null;
+  cc_addr: string | null;
+  subject: string | null;
+  category: Category | null;
+  is_list: number;
+  direction: Direction;
+  unread: number;
+  starred: number;
+  important: number;
+}
+
+/** A computed contact rollup the aggregation pass hands to the repo (camelCase). */
+export interface ContactAggregate {
+  address: string;
+  displayName?: string | null;
+  domain?: string | null;
+  msgsReceived: number;
+  msgsSent: number;
+  readCount: number;
+  repliedCount: number;
+  initiatedCount: number;
+  starredCount: number;
+  importantCount: number;
+  firstSeen?: string | null;
+  lastSeen?: string | null;
+}
+
+/** A computed domain rollup (camelCase). */
+export interface DomainAggregate {
+  domain: string;
+  msgs: number;
+  distinctContacts: number;
+}
+
+/** A computed thread rollup (camelCase). */
+export interface ThreadAggregate {
+  threadId: string;
+  subject?: string | null;
+  participants: string[];
+  msgCount: number;
+  unreadCount: number;
+  userParticipated: boolean;
+  firstAt?: string | null;
+  lastAt?: string | null;
+}
+
+/** A persisted contact row (snake_case rows from SQLite). */
+export interface ContactRow {
+  account: string;
+  address: string;
+  display_name: string | null;
+  domain: string | null;
+  msgs_received: number;
+  msgs_sent: number;
+  read_count: number;
+  replied_count: number;
+  initiated_count: number;
+  starred_count: number;
+  important_count: number;
+  first_seen: string | null;
+  last_seen: string | null;
+  curation: Curation | null;
+}
+
+/** A persisted domain row. */
+export interface DomainRow {
+  account: string;
+  domain: string;
+  msgs: number;
+  distinct_contacts: number;
+  curation: Curation | null;
+  category: string | null;
+}
+
+/** A persisted thread row. */
+export interface ThreadRow {
+  account: string;
+  thread_id: string;
+  subject: string | null;
+  participants_json: string | null;
+  msg_count: number;
+  unread_count: number;
+  user_participated: number;
+  first_at: string | null;
+  last_at: string | null;
+}
+
 export class Repo {
   readonly db: DatabaseSync;
 
@@ -537,5 +635,198 @@ export class Repo {
       input.note ?? null,
       new Date().toISOString(),
     );
+  }
+
+  // ---- aggregation read surface (M2.1, PLAN §6) ---------------------------
+  //
+  // The intelligence layer reads the INDEX ONLY (PLAN §4) — never the provider.
+  // These methods expose the message rows the aggregation pass rolls up, plus
+  // typed accessors for the derived contact/domain/thread tables it writes.
+
+  /**
+   * Stream the message fields the aggregation pass (`intelligence/aggregate.ts`)
+   * needs to roll messages up into contacts/domains/threads. Scoped to one
+   * account; ordered oldest-first by `internal_date` so first/last-seen and the
+   * thread "who started it" (initiated) signal fall out of a single forward
+   * pass. NULL `internal_date` rows sort first (oldest) deterministically.
+   */
+  messagesForAggregation(account: string): AggregationMessageRow[] {
+    return this.#prepare(
+      `SELECT account, gmail_message_id, thread_id, internal_date, date_header,
+              from_addr, to_addr, cc_addr, subject, category, is_list, direction,
+              unread, starred, important
+         FROM messages
+        WHERE account = ?
+        ORDER BY internal_date IS NULL DESC, internal_date ASC, gmail_message_id ASC`,
+    ).all(account) as unknown as AggregationMessageRow[];
+  }
+
+  /**
+   * Replace the derived contact/domain/thread rows for `account` in one
+   * transaction, so aggregation is idempotent and re-runnable: a re-run produces
+   * the same tables with no stale rows and no duplicates. Identity/curation
+   * columns the aggregation does not own — `person_id`, `curation`,
+   * `centrality`, `community_id` (contacts); `curation`, `category`,
+   * `category_note`, `categorized_at` (domains) — are preserved across the
+   * rebuild by carrying the existing values forward (an UPSERT, not a wipe), so
+   * a user's curation survives every aggregation.
+   */
+  replaceAggregates(
+    account: string,
+    aggregates: {
+      contacts: readonly ContactAggregate[];
+      domains: readonly DomainAggregate[];
+      threads: readonly ThreadAggregate[];
+    },
+  ): void {
+    this.transaction(() => {
+      this.#replaceContacts(account, aggregates.contacts);
+      this.#replaceDomains(account, aggregates.domains);
+      this.#replaceThreads(account, aggregates.threads);
+    });
+  }
+
+  #replaceContacts(account: string, contacts: readonly ContactAggregate[]): void {
+    // Drop contacts that no longer aggregate (none of their mail remains), but
+    // keep curation/identity for any that persist via the UPSERT below.
+    const keep = new Set(contacts.map((c) => c.address));
+    const existing = this.#prepare(
+      `SELECT address FROM contacts WHERE account = ?`,
+    ).all(account) as { address: string }[];
+    const del = this.#prepare(`DELETE FROM contacts WHERE account = ? AND address = ?`);
+    for (const row of existing) {
+      if (!keep.has(row.address)) del.run(account, row.address);
+    }
+
+    const up = this.#prepare(
+      `INSERT INTO contacts (
+         account, address, display_name, domain,
+         msgs_received, msgs_sent, read_count, replied_count, initiated_count,
+         starred_count, important_count, first_seen, last_seen
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(account, address) DO UPDATE SET
+         display_name    = COALESCE(excluded.display_name, contacts.display_name),
+         domain          = COALESCE(excluded.domain, contacts.domain),
+         msgs_received   = excluded.msgs_received,
+         msgs_sent       = excluded.msgs_sent,
+         read_count      = excluded.read_count,
+         replied_count   = excluded.replied_count,
+         initiated_count = excluded.initiated_count,
+         starred_count   = excluded.starred_count,
+         important_count = excluded.important_count,
+         first_seen      = excluded.first_seen,
+         last_seen       = excluded.last_seen`,
+    );
+    for (const c of contacts) {
+      up.run(
+        account,
+        c.address,
+        c.displayName ?? null,
+        c.domain ?? null,
+        c.msgsReceived,
+        c.msgsSent,
+        c.readCount,
+        c.repliedCount,
+        c.initiatedCount,
+        c.starredCount,
+        c.importantCount,
+        c.firstSeen ?? null,
+        c.lastSeen ?? null,
+      );
+    }
+  }
+
+  #replaceDomains(account: string, domains: readonly DomainAggregate[]): void {
+    const keep = new Set(domains.map((d) => d.domain));
+    const existing = this.#prepare(
+      `SELECT domain FROM domains WHERE account = ?`,
+    ).all(account) as { domain: string }[];
+    const del = this.#prepare(`DELETE FROM domains WHERE account = ? AND domain = ?`);
+    for (const row of existing) {
+      if (!keep.has(row.domain)) del.run(account, row.domain);
+    }
+
+    const up = this.#prepare(
+      `INSERT INTO domains (account, domain, msgs, distinct_contacts)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(account, domain) DO UPDATE SET
+         msgs              = excluded.msgs,
+         distinct_contacts = excluded.distinct_contacts`,
+    );
+    for (const d of domains) {
+      up.run(account, d.domain, d.msgs, d.distinctContacts);
+    }
+  }
+
+  #replaceThreads(account: string, threads: readonly ThreadAggregate[]): void {
+    // Threads carry no user-owned columns, so a clean replace is safe.
+    this.#prepare(`DELETE FROM threads WHERE account = ?`).run(account);
+    const ins = this.#prepare(
+      `INSERT INTO threads (
+         account, thread_id, subject, participants_json,
+         msg_count, unread_count, user_participated, first_at, last_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const t of threads) {
+      ins.run(
+        account,
+        t.threadId,
+        t.subject ?? null,
+        JSON.stringify(t.participants),
+        t.msgCount,
+        t.unreadCount,
+        bool(t.userParticipated),
+        t.firstAt ?? null,
+        t.lastAt ?? null,
+      );
+    }
+  }
+
+  /** Fetch one aggregated contact row (or undefined). */
+  getContact(account: string, address: string): ContactRow | undefined {
+    return this.#prepare(
+      `SELECT account, address, display_name, domain, msgs_received, msgs_sent,
+              read_count, replied_count, initiated_count, starred_count,
+              important_count, first_seen, last_seen, curation
+         FROM contacts WHERE account = ? AND address = ?`,
+    ).get(account, address) as ContactRow | undefined;
+  }
+
+  /**
+   * List Correspondents — contacts the user has ever written to (`msgs_sent >
+   * 0`, CONTEXT.md). The sharpest human-vs-noise separator: people remember by
+   * who they talked to. Ordered by sent volume then received volume, newest
+   * correspondence first on ties.
+   */
+  listCorrespondents(account: string, limit?: number): ContactRow[] {
+    const sql =
+      `SELECT account, address, display_name, domain, msgs_received, msgs_sent,
+              read_count, replied_count, initiated_count, starred_count,
+              important_count, first_seen, last_seen, curation
+         FROM contacts
+        WHERE account = ? AND msgs_sent > 0
+        ORDER BY msgs_sent DESC, msgs_received DESC, last_seen DESC` +
+      (limit != null ? ` LIMIT ?` : ``);
+    const rows = limit != null
+      ? this.#prepare(sql).all(account, limit)
+      : this.#prepare(sql).all(account);
+    return rows as unknown as ContactRow[];
+  }
+
+  /** Fetch one aggregated domain row (or undefined). */
+  getDomain(account: string, domain: string): DomainRow | undefined {
+    return this.#prepare(
+      `SELECT account, domain, msgs, distinct_contacts, curation, category
+         FROM domains WHERE account = ? AND domain = ?`,
+    ).get(account, domain) as DomainRow | undefined;
+  }
+
+  /** Fetch one aggregated thread row (or undefined). */
+  getThread(account: string, threadId: string): ThreadRow | undefined {
+    return this.#prepare(
+      `SELECT account, thread_id, subject, participants_json, msg_count,
+              unread_count, user_participated, first_at, last_at
+         FROM threads WHERE account = ? AND thread_id = ?`,
+    ).get(account, threadId) as ThreadRow | undefined;
   }
 }
