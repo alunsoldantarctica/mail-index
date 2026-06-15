@@ -30,6 +30,7 @@ import type { Repo } from '../index/repo.js';
 import { IndexError } from '../index/db.js';
 import { classifyMessage } from './classify.js';
 import { aggregateAccount } from '../intelligence/aggregate.js';
+import { interestPass } from '../intelligence/interest.js';
 
 /** Error thrown when a sync cannot start or run (lock contention, etc.). */
 export class SyncError extends Error {
@@ -221,6 +222,12 @@ export async function syncMetadata(options: SyncOptions): Promise<SyncResult> {
   // own contact list and feed Correspondent detection on Sent mail (D11).
   if (options.aggregate !== false) {
     aggregateAccount(repo, account, knownAddresses);
+    // Interest engine (M2.2, D12): recompute every contact's engagement_score
+    // from the now-current aggregates and append a per-contact snapshot. Still
+    // INDEX-ONLY and idempotent; the score is a curation SEED, never a fetch
+    // trigger (D13), so this never enriches. Gated on the same `aggregate` flag
+    // since it consumes the aggregates this run just rebuilt.
+    interestPass(repo, account);
   }
 
   return { runId, account, fetched, indexed, selector };

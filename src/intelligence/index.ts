@@ -4,3 +4,19 @@ export {
   computeAggregates,
   type Aggregates,
 } from './aggregate.js';
+export {
+  scoreContact,
+  interestPass,
+  type ContactFeatures,
+  type ScoredContact,
+  type InterestResult,
+  type InterestOptions,
+  W_REPLIED,
+  W_INITIATED,
+  W_IMPORTANT,
+  W_READ_RATE,
+  W_STARRED,
+  W_RECENCY_VOL,
+  W_BULK,
+  W_NEVER_OPENED,
+} from './interest.js';

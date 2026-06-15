@@ -186,6 +186,33 @@ export interface ThreadAggregate {
   lastAt?: string | null;
 }
 
+/**
+ * The per-contact scoring features the interest engine (M2.2, PLAN §10) reads.
+ * The aggregate read columns come straight off the derived `contacts` row;
+ * `bulk_count` is the count of *received* messages from this contact classified
+ * as bulk (`is_list = 1 OR category IN ('promotions','social')`), computed by
+ * joining the raw messages — the only signal the §10 weight table needs that
+ * the contact rollup does not already carry. Snake_case rows (repo convention).
+ */
+export interface ContactScoringRow {
+  address: string;
+  msgs_received: number;
+  msgs_sent: number;
+  read_count: number;
+  replied_count: number;
+  initiated_count: number;
+  starred_count: number;
+  important_count: number;
+  last_seen: string | null;
+  bulk_count: number;
+}
+
+/** A scored contact the interest engine hands back for persistence (camelCase). */
+export interface ScoredContactInput {
+  address: string;
+  engagementScore: number;
+}
+
 /** A persisted contact row (snake_case rows from SQLite). */
 export interface ContactRow {
   account: string;
@@ -828,5 +855,97 @@ export class Repo {
               unread_count, user_participated, first_at, last_at
          FROM threads WHERE account = ? AND thread_id = ?`,
     ).get(account, threadId) as ThreadRow | undefined;
+  }
+
+  // ---- interest engine surface (M2.2, PLAN §10, D12) ----------------------
+  //
+  // INDEX-ONLY (PLAN §4): the interest engine reads these derived rows and
+  // writes back `engagement_score` + a `contact_stats_snapshot`, never touching
+  // a provider.
+
+  /**
+   * The per-contact scoring features the interest engine blends (PLAN §10). One
+   * row per aggregated contact for `account`. The aggregate columns are read
+   * straight off `contacts`; `bulk_count` is computed with a correlated
+   * subquery counting this contact's *received* bulk mail (is_list OR
+   * promotions/social) from the raw `messages`, matching either the exact
+   * `from_addr` or the bare address embedded in a `Name <addr>` header — the one
+   * §10 signal the contact rollup does not already carry.
+   */
+  contactScoringRows(account: string): ContactScoringRow[] {
+    const rows = this.#prepare(
+      `SELECT c.address, c.msgs_received, c.msgs_sent, c.read_count,
+              c.replied_count, c.initiated_count, c.starred_count,
+              c.important_count, c.last_seen,
+              (
+                SELECT count(*) FROM messages m
+                 WHERE m.account = c.account
+                   AND m.direction = 'received'
+                   AND (m.is_list = 1 OR m.category IN ('promotions','social'))
+                   AND (
+                     m.from_addr = c.address
+                     OR lower(m.from_addr) LIKE '%<' || lower(c.address) || '>%'
+                   )
+              ) AS bulk_count
+         FROM contacts c
+        WHERE c.account = ?`,
+    ).all(account) as unknown as ContactScoringRow[];
+    return rows;
+  }
+
+  /**
+   * Persist the interest engine's output for `account` (D12): set each contact's
+   * `engagement_score` and append one `contact_stats_snapshot` row per contact
+   * stamped `taken_at`. Both in one transaction so a run is atomic. The snapshot
+   * is append-only — re-running the pass adds a new generation (distinct
+   * `taken_at`) rather than overwriting, which is what makes trend a v1.1 query
+   * with no migration. Scores are written only for contacts that still exist
+   * (the aggregation owns row lifecycle); a snapshot mirrors the score's source
+   * aggregates (msgs_received / read_count / replied_count) so a snapshot is
+   * self-describing without a join back to a mutable `contacts` row.
+   */
+  persistEngagementScores(
+    account: string,
+    scored: readonly ScoredContactInput[],
+    takenAt: string,
+  ): void {
+    const setScore = this.#prepare(
+      `UPDATE contacts SET engagement_score = ? WHERE account = ? AND address = ?`,
+    );
+    const snapshot = this.#prepare(
+      `INSERT INTO contact_stats_snapshot (
+         account, address, taken_at,
+         msgs_received, read_count, replied_count, engagement_score
+       )
+       SELECT account, address, ?, msgs_received, read_count, replied_count, ?
+         FROM contacts WHERE account = ? AND address = ?
+       ON CONFLICT(account, address, taken_at) DO UPDATE SET
+         msgs_received    = excluded.msgs_received,
+         read_count       = excluded.read_count,
+         replied_count    = excluded.replied_count,
+         engagement_score = excluded.engagement_score`,
+    );
+    this.transaction(() => {
+      for (const s of scored) {
+        setScore.run(s.engagementScore, account, s.address);
+        snapshot.run(takenAt, s.engagementScore, account, s.address);
+      }
+    });
+  }
+
+  /** Fetch a contact's current engagement_score (or null/undefined). */
+  getEngagementScore(account: string, address: string): number | null | undefined {
+    const row = this.#prepare(
+      `SELECT engagement_score FROM contacts WHERE account = ? AND address = ?`,
+    ).get(account, address) as { engagement_score: number | null } | undefined;
+    return row ? row.engagement_score : undefined;
+  }
+
+  /** Count `contact_stats_snapshot` rows for a contact (snapshot generations). */
+  countSnapshots(account: string, address: string): number {
+    const row = this.#prepare(
+      `SELECT count(*) c FROM contact_stats_snapshot WHERE account = ? AND address = ?`,
+    ).get(account, address) as { c: number };
+    return row.c;
   }
 }
