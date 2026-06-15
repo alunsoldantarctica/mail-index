@@ -10,8 +10,10 @@ server**.
 Local-first — the index never leaves your machine. Read-only — it never sends or
 mutates your mail.
 
-> **Status: planning.** A working single-file prototype exists. The full
-> architecture and build plan live in **[docs/PLAN.md](docs/PLAN.md)**.
+> **Status: v1.0.** Progressive sync, the correspondence graph, the interest
+> engine, curation, the full 16-tool MCP surface, and the write-back loops are
+> shipped. The full architecture and build plan live in
+> **[docs/PLAN.md](docs/PLAN.md)**; start with **[docs/INSTALL.md](docs/INSTALL.md)**.
 
 ---
 
@@ -49,10 +51,36 @@ TypeScript · `node:sqlite` (no native deps) · SQLite FTS5 · Graphology ·
 `@modelcontextprotocol/sdk`. Node 24+. Pluggable `MailSource` adapters; v1 ships
 the Gmail adapter (via the `gws` CLI).
 
-## Status & roadmap
+## CLI
 
-See **[docs/PLAN.md](docs/PLAN.md)** for the full spec, data model, decisions
-(ADR digest), and roadmap.
+Two bins ship: `mail-index` (CLI) and `mail-index-mcp` (the stdio MCP server).
+
+```
+mail-index init                          Scaffold the operator config + data dir
+mail-index sync    --account <a> [--since 30d|1mo] [--all] [--query <q>] [--limit N]
+mail-index sync    --all-accounts        Sync every account by its policy presets
+mail-index enrich  --account <a> [--profile | --rule direct|all] [--sender <s>] [--match <fts>] [--limit N]
+mail-index graph   build [--account <a> | --all-accounts]
+mail-index curate  [--account <a>]       Interactive curation wizard (no-agent fallback)
+mail-index compact [--account <a>] [--now]   Demote summarized bulk bodies (ADR-0003)
+mail-index search  <terms> [--account <a>] [--limit N] [--enrich]
+mail-index show    <account:message-id>  Print a message (auto-enriches a meta row)
+mail-index open    <account:message-id>  Print the provider web URL (no fetch)
+mail-index status  [--json]              Per-account freshness + counts
+```
+
+## Documentation
+
+- **[docs/INSTALL.md](docs/INSTALL.md)** — generic onboarding (install,
+  authenticate a MailSource, init, sync, curate, enrich, add the MCP server,
+  scheduled-sync snippet).
+- **[docs/MCP.md](docs/MCP.md)** — the 16-tool MCP reference for agent
+  integrators: args, compact result shapes, the `index_as_of` freshness +
+  command-handback contracts.
+- **[docs/ADAPTERS.md](docs/ADAPTERS.md)** — the `MailSource` contract and how to
+  write + contract-test a new adapter.
+- **[docs/PLAN.md](docs/PLAN.md)** — the full spec, data model, decisions (ADR
+  digest), and roadmap.
 
 ## License
 
