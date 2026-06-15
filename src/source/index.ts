@@ -1,0 +1,160 @@
+/**
+ * The `MailSource` adapter interface (SCOPE 0.3, ADR/D1, PLAN §4 ingest layer,
+ * §19 adapter contract).
+ *
+ * A `MailSource` is the *only* seam through which the ingest layer talks to a
+ * mail provider. Everything above it — the index, engines, MCP/CLI surfaces —
+ * is provider-agnostic (PLAN §4: "Only the ingest layer talks to the MailSource
+ * adapter"). gws is Adapter #1 (D1); `DirectGmailAdapter` / `ImapAdapter` are
+ * v1.x. Keeping the provider behind this interface keeps the gws setup tax a
+ * swappable concern, not a permanent one.
+ *
+ * The interface mirrors the two-phase progressive sync (PLAN §7):
+ *
+ *  - {@link MailSource.listIds} enumerates the message ids in a scope (the
+ *    selector a sync run records).
+ *  - {@link MailSource.getMetadata} fetches the cheap `format=metadata` shape
+ *    phase-1 sync stores: headers + snippet + labels + internalDate. No body.
+ *  - {@link MailSource.getFull} fetches the `format=full` shape phase-2 enrich
+ *    promotes a Message to: the metadata plus a (raw, not-yet-distilled) body.
+ *  - {@link MailSource.check} is the auth/identity probe: who am I, am I
+ *    authenticated. Run before a sync so failures surface up front.
+ *
+ * These types are the contract every adapter *and* the sync layer share. They
+ * are deliberately provider-neutral (no Gmail-API JSON shapes leak through);
+ * field names line up with the index's `MessageInput` (see `index/repo.ts`) so
+ * the sync layer is a near-mechanical mapping. Distillation (HTML→text, quote/
+ * signature stripping — CONTEXT.md "Enrichment") happens in the ingest layer,
+ * NOT in the adapter: an adapter hands back the body as the provider gave it.
+ */
+
+/**
+ * The set of messages a sync run operates over. Provider-neutral; an adapter
+ * translates it into whatever its provider understands (a Gmail search query,
+ * an IMAP range, …). All fields optional — an empty scope means "the whole
+ * mailbox in scope by the adapter's own policy" (PLAN §15 per-account policy).
+ */
+export interface MailScope {
+  /**
+   * Provider-native query/filter string (e.g. a Gmail search expression like
+   * `from:bloomberg.com`). Opaque to everything above the adapter.
+   */
+  query?: string;
+  /**
+   * Lower bound on message age, as an ISO-8601 timestamp or a relative token
+   * the adapter understands (e.g. `30d`, `1mo`). Matches the CLI `--since`.
+   */
+  since?: string;
+  /** Hard cap on the number of ids returned. */
+  limit?: number;
+  /** Include messages the user sent (PLAN D11 — Sent metadata is indexed). */
+  includeSent?: boolean;
+}
+
+/**
+ * Result of the auth/identity probe ({@link MailSource.check}). `ok=false`
+ * means the adapter could not authenticate or reach the provider; `reason`
+ * carries a human-readable explanation for the CLI/log.
+ */
+export interface SourceIdentity {
+  /** Whether the adapter is authenticated and the provider is reachable. */
+  ok: boolean;
+  /**
+   * The authenticated mailbox address (the provider's notion of "me"), when
+   * known. Null when the probe failed or the provider does not expose it.
+   */
+  address: string | null;
+  /** Human-readable detail, especially when `ok` is false. */
+  reason?: string;
+}
+
+/**
+ * The `format=metadata` shape phase-1 sync stores (PLAN §6 `messages`, §7
+ * phase 1). Headers + snippet + labels + timestamps; deliberately NO body.
+ * Field names mirror `index/repo.ts` `MessageInput` so the mapping is direct.
+ */
+export interface MessageMetadata {
+  /** Provider message id, unique within the source's mailbox. */
+  id: string;
+  /** Provider thread/conversation id this message belongs to. */
+  threadId: string | null;
+  /**
+   * Provider-internal receipt timestamp, epoch milliseconds (Gmail
+   * `internalDate`). The canonical sort/“when” axis.
+   */
+  internalDate: number | null;
+  /** Raw `Date:` header value, when present. */
+  dateHeader: string | null;
+  /** `From:` header (display name + address as the provider gave it). */
+  from: string | null;
+  /** `To:` header. */
+  to: string | null;
+  /** `Cc:` header. */
+  cc: string | null;
+  /** `Subject:` header. */
+  subject: string | null;
+  /**
+   * Provider label ids/names attached to the message (Gmail `labelIds`:
+   * `INBOX`, `UNREAD`, `CATEGORY_PROMOTIONS`, `SENT`, …). Classification (§8)
+   * derives category/is_list/direction/unread from these in the ingest layer.
+   */
+  labels: string[];
+  /** Provider-supplied short preview text (Gmail `snippet`). */
+  snippet: string | null;
+  /** Provider estimate of the message size in bytes, when known. */
+  sizeEstimate: number | null;
+}
+
+/**
+ * The `format=full` shape phase-2 enrich promotes a Message to (PLAN §7 phase
+ * 2): everything in {@link MessageMetadata} plus the message body. The body is
+ * returned *as the provider gave it* (raw text and/or HTML); the ingest layer
+ * distills it (CONTEXT.md "Enrichment"). Adapters do no stripping.
+ */
+export interface MessageFull extends MessageMetadata {
+  /** Plain-text body part, when the provider supplied one. */
+  bodyText: string | null;
+  /** HTML body part, when the provider supplied one. */
+  bodyHtml: string | null;
+  /** MIME type the body was sourced from, for the distiller's benefit. */
+  mimeType: string | null;
+}
+
+/**
+ * The provider seam. An adapter implements this; the ingest layer is the only
+ * caller. Read-only by contract (CONTEXT.md "Read-only"): no method ever
+ * mutates the mailbox.
+ *
+ * Methods are async — every real adapter is network-bound (the bottleneck per
+ * D5). {@link MailSource.listIds} returns an `AsyncIterable` so an adapter can
+ * page lazily over a large mailbox without buffering every id in memory; a
+ * fixture-backed fake may simply yield from an array.
+ */
+export interface MailSource {
+  /** Stable identifier for the underlying provider (e.g. `gws`, `imap`). */
+  readonly provider: string;
+
+  /**
+   * Auth/identity probe. Resolves to {@link SourceIdentity}; never throws for
+   * an ordinary auth failure (it reports `ok:false` instead) so callers can
+   * decide how to surface it. May throw only for programmer errors.
+   */
+  check(): Promise<SourceIdentity>;
+
+  /**
+   * Enumerate the provider message ids in `scope`, newest-first by the
+   * provider's natural order. Lazy: yields ids (or id pages flattened to ids)
+   * so the sync loop can start work before the full list is known.
+   */
+  listIds(scope?: MailScope): AsyncIterable<string>;
+
+  /**
+   * Fetch the metadata record for each id, in input order. Ids the provider
+   * cannot return (deleted, inaccessible) are omitted from the result rather
+   * than represented as holes — callers match on `id`.
+   */
+  getMetadata(ids: readonly string[]): Promise<MessageMetadata[]>;
+
+  /** Fetch the full record (metadata + body) for one id, or null if missing. */
+  getFull(id: string): Promise<MessageFull | null>;
+}
