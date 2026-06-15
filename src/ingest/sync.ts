@@ -31,6 +31,7 @@ import { IndexError } from '../index/db.js';
 import { classifyMessage } from './classify.js';
 import { aggregateAccount } from '../intelligence/aggregate.js';
 import { interestPass } from '../intelligence/interest.js';
+import { compact } from '../writeback/index.js';
 
 /** Error thrown when a sync cannot start or run (lock contention, etc.). */
 export class SyncError extends Error {
@@ -61,6 +62,15 @@ export interface SyncOptions {
    * caller batches many syncs and aggregates once at the end).
    */
   aggregate?: boolean;
+  /**
+   * Whether to auto-invoke `compact` after the aggregation pass to demote
+   * summarized bulk bodies past the grace window (ADR-0003). Defaults to `true`
+   * — demotion keeps the index a small Working set and is INDEX-ONLY +
+   * idempotent. Gated on `aggregate` (a no-aggregate sweep skips it too, since
+   * eligibility reads the curation/thread state aggregation refreshes). Set
+   * `false` to sweep without compacting.
+   */
+  compact?: boolean;
 }
 
 /** Outcome of a completed (or failed-then-recorded) sync run. */
@@ -228,6 +238,16 @@ export async function syncMetadata(options: SyncOptions): Promise<SyncResult> {
     // trigger (D13), so this never enriches. Gated on the same `aggregate` flag
     // since it consumes the aggregates this run just rebuilt.
     interestPass(repo, account);
+
+    // Demotion (ADR-0003): once a bulk body has a summary older than the grace
+    // window, drop the distilled body — summary-only is the end state, and the
+    // provider remains the archive (Working set). Default grace (7 days); this
+    // only demotes eligible rows, so a fresh sync with no aged summaries is a
+    // no-op. Gated on the same aggregate flag since eligibility reads the
+    // curation + thread-participation state the aggregation just rebuilt.
+    if (options.compact !== false) {
+      compact(repo, account);
+    }
   }
 
   return { runId, account, fetched, indexed, selector };

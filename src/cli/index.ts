@@ -29,6 +29,7 @@ import { formatOpen, runOpen } from './open.js';
 import { buildStatus, formatStatus, formatStatusJson } from './status.js';
 import { formatGraphResult, runGraphBuildAll, runGraphBuildOne } from './graph.js';
 import { formatCurate, readlinePrompter, runCurate } from './curate.js';
+import { compact } from '../writeback/index.js';
 
 const USAGE = `mail-index — a local, agent-queryable mail intelligence layer
 
@@ -44,6 +45,7 @@ Commands:
   show    <account:message-id>  Print a message's full record (auto-enriches a meta row)
   open    <account:message-id>  Print the provider web URL for a message (no fetch)
   graph   build                 Build the contact graph (centrality + communities)
+  compact [--account <label>]   Demote summarized bulk bodies to summary-only (ADR-0003)
   status                        Show per-account index freshness + counts
 
 Run 'mail-index <command> --help' for command-specific options.
@@ -143,6 +145,25 @@ incremental sweep, so sync auto-runs it only after a full/initial sync.
 Options:
   --account <label>   Account label from the operator config (required unless --all-accounts)
   --all-accounts      Build the graph for every configured account
+`;
+
+const COMPACT_USAGE = `mail-index compact — demote summarized bulk bodies (ADR-0003)
+
+Usage:
+  mail-index compact [--account <label>] [--now]
+  mail-index compact --all-accounts [--now]
+
+For each message that has an agent-written summary and is bulk (is_list or
+promotions/social) and NOT a curated-important sender or user-participated
+thread, once past the grace window (default 7 days) the distilled body is
+dropped and the row moves to summary-only — FTS then indexes the summary. The
+provider remains the archive, so this is never data loss (Working set).
+INDEX-ONLY: reads + rewrites the local index, never the provider.
+
+Options:
+  --account <label>   Account to compact (default: the sole configured account)
+  --all-accounts      Compact every configured account
+  --now               Ignore the grace window — demote every eligible body now
 `;
 
 const STATUS_USAGE = `mail-index status — per-account index freshness + counts
@@ -514,6 +535,65 @@ function cmdGraph(argv: string[]): number {
   }
 }
 
+function cmdCompact(argv: string[]): number {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      account: { type: 'string' },
+      'all-accounts': { type: 'boolean' },
+      now: { type: 'boolean' },
+      help: { type: 'boolean' },
+    },
+    allowPositionals: false,
+  });
+
+  if (values.help) {
+    process.stdout.write(COMPACT_USAGE);
+    return 0;
+  }
+
+  // INDEX-ONLY (PLAN §4): compaction needs only the account LABEL to scope the
+  // index, not an adapter binding — but loadConfig is the source of truth for
+  // which accounts exist.
+  const config = loadConfig();
+  const labels = Object.keys(config.accounts);
+  const opts = values.now ? { now: true } : {};
+
+  const db = openDb();
+  try {
+    const repo = new Repo(db);
+
+    if (values['all-accounts']) {
+      if (labels.length === 0) {
+        throw new CliError('no accounts configured — run mail-index init and edit the config');
+      }
+      for (const label of labels) {
+        const result = compact(repo, label, opts);
+        process.stdout.write(`${result.account}: demoted ${result.demoted} body(ies) to summary-only\n`);
+      }
+      return 0;
+    }
+
+    let account = values.account;
+    if (account == null) {
+      if (labels.length === 1) {
+        account = labels[0]!;
+      } else if (labels.length === 0) {
+        throw new CliError('no accounts configured — run mail-index init and edit the config');
+      } else {
+        throw new CliError(`compact requires --account <label> (configured: ${labels.join(', ')})`);
+      }
+    }
+    resolveAccount(config, account);
+
+    const result = compact(repo, account, opts);
+    process.stdout.write(`${result.account}: demoted ${result.demoted} body(ies) to summary-only\n`);
+    return 0;
+  } finally {
+    db.close();
+  }
+}
+
 function cmdStatus(argv: string[]): number {
   const { values } = parseArgs({
     args: argv,
@@ -565,6 +645,8 @@ async function main(argv: string[]): Promise<number> {
       return cmdOpen(rest);
     case 'graph':
       return cmdGraph(rest);
+    case 'compact':
+      return cmdCompact(rest);
     case 'status':
       return cmdStatus(rest);
     default:

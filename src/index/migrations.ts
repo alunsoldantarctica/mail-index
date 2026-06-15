@@ -163,8 +163,31 @@ const m001_initial: Migration = {
   },
 };
 
+/**
+ * Migration 2 — thread-level summary columns (M3.5, ADR-0003).
+ *
+ * `messages` already carries the summary ladder (`summary_text` /
+ * `summary_is_model` / `summarized_at`, migration 1); threads did not. A
+ * thread summary is the agent's paraphrase of a whole conversation (ADR-0003:
+ * "thread preferred when a conversation is the meaningful unit"). It attaches
+ * to the thread row, is provenance-marked, and never overwrites the thread's
+ * source fields. Threads carry no FTS row of their own (the per-message FTS
+ * index already covers conversation text), so this is a pure column add.
+ */
+const m002_thread_summary: Migration = {
+  version: 2,
+  name: 'thread summary columns',
+  up: (db) => {
+    db.exec(`
+      ALTER TABLE threads ADD COLUMN summary_text     TEXT;
+      ALTER TABLE threads ADD COLUMN summary_is_model INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE threads ADD COLUMN summarized_at    TEXT;
+    `);
+  },
+};
+
 /** All migrations, in ascending version order. Append-only. */
-export const MIGRATIONS: readonly Migration[] = [m001_initial];
+export const MIGRATIONS: readonly Migration[] = [m001_initial, m002_thread_summary];
 
 /** Read the database's applied schema version (SQLite `user_version`). */
 export function getUserVersion(db: DatabaseSync): number {
