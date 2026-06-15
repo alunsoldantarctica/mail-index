@@ -15,13 +15,14 @@
 
 import { parseArgs } from 'node:util';
 
-import { ConfigError, loadConfig } from '../config/index.js';
+import { ConfigError, loadConfig, resolveAccount } from '../config/index.js';
 import { IndexError, openDb } from '../index/db.js';
 import { Repo } from '../index/repo.js';
 import { SyncError } from '../ingest/sync.js';
+import { enrich, EnrichError, type EnrichSelector } from '../ingest/enrich.js';
 
 import { formatInit, runInit } from './init.js';
-import { formatSyncResult, runSyncAll, runSyncOne, type SyncFlags } from './sync.js';
+import { buildSource, formatSyncResult, runSyncAll, runSyncOne, type SyncFlags } from './sync.js';
 import { formatResults, runSearchEnriching, type SearchFlags } from './search.js';
 import { formatShow, parseRef, runShow, RefError } from './show.js';
 import { formatOpen, runOpen } from './open.js';
@@ -35,6 +36,7 @@ Usage:
 Commands:
   init                          Scaffold the operator config + data dir
   sync    --account <label>     Sync message metadata for an account
+  enrich  --account <label>     Fetch + distil bodies for selected messages (phase 2)
   search  <terms>               Recall over the index (ranked, snippet-first)
   show    <account:message-id>  Print a message's full record (auto-enriches a meta row)
   open    <account:message-id>  Print the provider web URL for a message (no fetch)
@@ -56,6 +58,22 @@ Options:
   --query <q>         Provider-native search filter (e.g. from:bloomberg.com)
   --limit N           Cap the number of ids the sweep enumerates
   --all-accounts      Sync every configured account using its own policy presets
+`;
+
+const ENRICH_USAGE = `mail-index enrich — phase-2 selective body enrichment
+
+Usage:
+  mail-index enrich --account <label> [--rule direct|all] [--sender <addr>] [--match <fts>] [--limit N]
+
+Promotes matching meta messages to full: fetch the provider body, distil it
+(raw bytes are never stored), and re-index FTS with the distilled text.
+
+Options:
+  --account <label>   Account label from the operator config (required)
+  --rule direct|all   direct = non-list, non-promo/social mail (default); all = every meta row
+  --sender <addr>     Only messages from this address
+  --match <fts>       Only meta messages matching this FTS query
+  --limit N           Cap the number of messages enriched
 `;
 
 const SEARCH_USAGE = `mail-index search — ranked recall over the index
@@ -173,6 +191,54 @@ async function cmdSync(argv: string[]): Promise<number> {
     }
     const result = await runSyncOne(config, values.account, flags, repo);
     process.stdout.write(formatSyncResult(result) + '\n');
+    return 0;
+  } finally {
+    db.close();
+  }
+}
+
+async function cmdEnrich(argv: string[]): Promise<number> {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      account: { type: 'string' },
+      rule: { type: 'string' },
+      sender: { type: 'string' },
+      match: { type: 'string' },
+      limit: { type: 'string' },
+      help: { type: 'boolean' },
+    },
+    allowPositionals: false,
+  });
+
+  if (values.help) {
+    process.stdout.write(ENRICH_USAGE);
+    return 0;
+  }
+
+  if (!values.account) {
+    throw new CliError('enrich requires --account <label>');
+  }
+  if (values.rule != null && values.rule !== 'direct' && values.rule !== 'all') {
+    throw new CliError(`--rule must be "direct" or "all", got "${values.rule}"`);
+  }
+
+  const selector: EnrichSelector = {
+    ...(values.rule ? { rule: values.rule as 'direct' | 'all' } : {}),
+    ...(values.sender ? { sender: values.sender } : {}),
+    ...(values.match ? { match: values.match } : {}),
+    ...(parseLimit(values.limit, '--limit') != null ? { limit: parseLimit(values.limit, '--limit') } : {}),
+  };
+
+  const config = loadConfig();
+  const account = resolveAccount(config, values.account);
+  const db = openDb();
+  try {
+    const repo = new Repo(db);
+    const source = buildSource(account);
+    const result = await enrich({ account: values.account, source, repo, selector });
+    const sel = result.selector ? ` (${result.selector})` : '';
+    process.stdout.write(`${result.account}: fetched ${result.fetched}, enriched ${result.enriched}${sel}\n`);
     return 0;
   } finally {
     db.close();
@@ -328,6 +394,8 @@ async function main(argv: string[]): Promise<number> {
       return cmdInit();
     case 'sync':
       return cmdSync(rest);
+    case 'enrich':
+      return cmdEnrich(rest);
     case 'search':
       return cmdSearch(rest);
     case 'show':
@@ -350,6 +418,7 @@ main(process.argv.slice(2))
       err instanceof ConfigError ||
       err instanceof IndexError ||
       err instanceof SyncError ||
+      err instanceof EnrichError ||
       err instanceof CliError ||
       err instanceof RefError
     ) {
