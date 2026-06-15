@@ -28,6 +28,10 @@ export type {
   CurationContactRow,
   CurationDomainRow,
   InterestProfileRow,
+  ContactDetailRow,
+  ContactSort,
+  ContactListFilter,
+  GraphNeighborRow,
 } from './repo.js';
 export {
   SCHEMA_VERSION,

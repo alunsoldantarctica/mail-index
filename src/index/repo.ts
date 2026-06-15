@@ -315,6 +315,53 @@ export interface ThreadRow {
 }
 
 /**
+ * A contact row enriched with its derived `engagement_score`, `centrality`, and
+ * `community_id` — the shape the MCP `list_contacts` / `get_contact` /
+ * `find_person` tools (M3.4, PLAN §12) project. Extends {@link ContactRow} with
+ * the derived signals so the agent can rank/sort without a second read.
+ * Snake_case rows (repo convention).
+ */
+export interface ContactDetailRow extends ContactRow {
+  engagement_score: number | null;
+  centrality: number | null;
+  community_id: number | null;
+}
+
+/**
+ * How {@link Repo.listContacts} orders the contact list (M3.4, PLAN §12). The
+ * agent picks the ranking axis; every axis is a stable ORDER BY with a
+ * deterministic tiebreak on address.
+ */
+export type ContactSort = 'engagement' | 'volume' | 'recency' | 'community';
+
+/**
+ * A {@link Repo.listContacts} filter (M3.4, PLAN §12). `correspondent` keeps
+ * only Contacts the user has written to (`msgs_sent > 0`, CONTEXT.md); a
+ * {@link Curation} value keeps only contacts with that disposition. Combine via
+ * the options object — both are optional (AND when both supplied).
+ */
+export interface ContactListFilter {
+  correspondent?: boolean;
+  curation?: Curation;
+}
+
+/**
+ * One ranked co-recipiency neighbour of a contact (M3.4 `graph_neighbors`,
+ * PLAN §12, D8/D9). `shared_threads` is the number of non-list threads the pair
+ * co-occurred in (the edge weight); rows are ranked by it descending so the
+ * strongest correspondence partners surface first. Snake_case (repo convention).
+ */
+export interface GraphNeighborRow {
+  address: string;
+  display_name: string | null;
+  domain: string | null;
+  shared_threads: number;
+  engagement_score: number | null;
+  centrality: number | null;
+  community_id: number | null;
+}
+
+/**
  * A contact row joined with the curation signals the curation propose() step
  * (M3.1, PLAN §11) ranks on. Aggregate columns + `engagement_score` come
  * straight off `contacts`; `is_list` is a derived 0/1 flag — 1 when the contact
@@ -1427,6 +1474,337 @@ export class Repo {
               summary_text, summary_is_model, summarized_at
          FROM threads WHERE account = ? AND thread_id = ?`,
     ).get(account, threadId) as ThreadRow | undefined;
+  }
+
+  // ---- MCP read surface (M3.4, PLAN §12) ----------------------------------
+  //
+  // INDEX-ONLY (PLAN §4): the MCP server reads these derived rows to answer
+  // recall-shaped questions (CONTEXT.md "Recall") — ranked contact lists, fuzzy
+  // person resolution (Correspondents first), thread listings, and graph
+  // neighbours/communities. None touch a provider. Shapes stay compact +
+  // token-conscious (SCOPE 3.4(b)): bounded by `limit`, snippet/metadata only.
+  // An optional `account` scopes to one mailbox; omit it for cross-account.
+
+  /**
+   * List contacts ranked by `sort` and narrowed by `filter` (M3.4, PLAN §12,
+   * DESIGN TEST recall). Projects the derived `engagement_score` / `centrality`
+   * / `community_id` alongside the aggregate columns. Sorts:
+   *  - `engagement` — engagement_score desc (NULLs last), then sent/received;
+   *  - `volume` — received + sent desc;
+   *  - `recency` — last_seen desc;
+   *  - `community` — community_id asc (NULLs last), then engagement desc.
+   * All have a stable `address` tiebreak. `limit` defaults at the call site.
+   */
+  listContacts(
+    opts: {
+      account?: string;
+      sort?: ContactSort;
+      filter?: ContactListFilter;
+      limit?: number;
+    } = {},
+  ): ContactDetailRow[] {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.account) {
+      where.push(`account = ?`);
+      params.push(opts.account);
+    }
+    if (opts.filter?.correspondent) where.push(`msgs_sent > 0`);
+    if (opts.filter?.curation) {
+      where.push(`curation = ?`);
+      params.push(opts.filter.curation);
+    }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    let orderBy: string;
+    switch (opts.sort ?? 'engagement') {
+      case 'volume':
+        orderBy = `(msgs_received + msgs_sent) DESC, address ASC`;
+        break;
+      case 'recency':
+        orderBy = `last_seen IS NULL, last_seen DESC, address ASC`;
+        break;
+      case 'community':
+        orderBy = `community_id IS NULL, community_id ASC, engagement_score IS NULL, engagement_score DESC, address ASC`;
+        break;
+      case 'engagement':
+      default:
+        orderBy = `engagement_score IS NULL, engagement_score DESC, msgs_sent DESC, msgs_received DESC, address ASC`;
+        break;
+    }
+
+    const limit = opts.limit ?? 20;
+    const rows = this.#prepare(
+      `SELECT account, address, display_name, domain, msgs_received, msgs_sent,
+              read_count, replied_count, initiated_count, starred_count,
+              important_count, first_seen, last_seen, curation,
+              engagement_score, centrality, community_id
+         FROM contacts
+        ${whereSql}
+        ORDER BY ${orderBy}
+        LIMIT ?`,
+    ).all(...(params as never[]), limit) as unknown as ContactDetailRow[];
+    return rows;
+  }
+
+  /** Fetch one contact with its derived signals (M3.4 `get_contact`). */
+  getContactDetail(account: string, address: string): ContactDetailRow | undefined {
+    return this.#prepare(
+      `SELECT account, address, display_name, domain, msgs_received, msgs_sent,
+              read_count, replied_count, initiated_count, starred_count,
+              important_count, first_seen, last_seen, curation,
+              engagement_score, centrality, community_id
+         FROM contacts WHERE account = ? AND address = ?`,
+    ).get(account, address) as ContactDetailRow | undefined;
+  }
+
+  /**
+   * Fuzzy contact resolution from a vague hint (M3.4 `find_person`, PLAN §12,
+   * CONTEXT.md "Recall"). Matches the hint as a case-insensitive substring of
+   * the display name, the address, or the domain — so a name fragment, a bare
+   * handle, or a company domain all resolve. CRITICAL ranking (PLAN §12, DESIGN
+   * TEST): **Correspondents first** — people remember by who they talked to —
+   * so rows are ordered `msgs_sent > 0` desc, then engagement_score (NULLs
+   * last), then sent/received volume, then address. Never returns a bare empty
+   * set where a substring near-miss exists. `limit` defaults at the call site.
+   */
+  findContacts(hint: string, opts: { account?: string; limit?: number } = {}): ContactDetailRow[] {
+    const needle = `%${hint.trim().toLowerCase()}%`;
+    const where: string[] = [
+      `(lower(display_name) LIKE ? OR lower(address) LIKE ? OR lower(domain) LIKE ?)`,
+    ];
+    const params: unknown[] = [needle, needle, needle];
+    if (opts.account) {
+      where.push(`account = ?`);
+      params.push(opts.account);
+    }
+    const limit = opts.limit ?? 10;
+    const rows = this.#prepare(
+      `SELECT account, address, display_name, domain, msgs_received, msgs_sent,
+              read_count, replied_count, initiated_count, starred_count,
+              important_count, first_seen, last_seen, curation,
+              engagement_score, centrality, community_id
+         FROM contacts
+        WHERE ${where.join(' AND ')}
+        ORDER BY (msgs_sent > 0) DESC, engagement_score IS NULL, engagement_score DESC,
+                 msgs_sent DESC, msgs_received DESC, address ASC
+        LIMIT ?`,
+    ).all(...(params as never[]), limit) as unknown as ContactDetailRow[];
+    return rows;
+  }
+
+  /**
+   * Threads a contact participates in, newest-first (M3.4 `list_threads` by
+   * contact, `get_contact` recent threads). A thread "involves" the contact when
+   * the contact is its sender or recipient on any message — matched by the bare
+   * address or the bracketed `Name <addr>` header form. `limit` defaults at the
+   * call site.
+   */
+  threadsForContact(account: string, address: string, limit = 20): ThreadRow[] {
+    const bare = address.toLowerCase();
+    const bracket = `%<${bare}>%`;
+    const rows = this.#prepare(
+      `SELECT t.account, t.thread_id, t.subject, t.participants_json, t.msg_count,
+              t.unread_count, t.user_participated, t.first_at, t.last_at,
+              t.summary_text, t.summary_is_model, t.summarized_at
+         FROM threads t
+        WHERE t.account = ?
+          AND EXISTS (
+            SELECT 1 FROM messages m
+             WHERE m.account = t.account AND m.thread_id = t.thread_id
+               AND (
+                 m.from_addr = ? OR lower(m.from_addr) LIKE ?
+                 OR m.to_addr = ? OR lower(m.to_addr) LIKE ?
+                 OR m.cc_addr = ? OR lower(m.cc_addr) LIKE ?
+               )
+          )
+        ORDER BY t.last_at IS NULL, t.last_at DESC, t.thread_id ASC
+        LIMIT ?`,
+    ).all(account, address, bracket, address, bracket, address, bracket, limit) as unknown as ThreadRow[];
+    return rows;
+  }
+
+  /**
+   * Threads whose messages match an FTS query, ranked best-first (M3.4
+   * `list_threads` by query). Resolves the FTS hits to their distinct threads,
+   * ordered by the best (lowest bm25) hit in each thread. `limit` defaults at the
+   * call site.
+   */
+  threadsForQuery(query: string, opts: { account?: string; limit?: number } = {}): ThreadRow[] {
+    const limit = opts.limit ?? 20;
+    // FTS5's bm25() is an auxiliary function usable only in the direct FTS query
+    // context (an ORDER BY over the matched FTS table) — selecting it through a
+    // JOIN/GROUP BY raises "unable to use function bm25". So fold thread ranking
+    // in JS: walk the bm25-ordered message hits (reusing the proven
+    // {@link searchMessages} path) and keep each thread's FIRST (best-ranked)
+    // appearance, preserving rank order, then fetch the thread rows in that
+    // order. A generous hit cap keeps it bounded.
+    const hits = this.searchMessages(query, {
+      ...(opts.account ? { account: opts.account } : {}),
+      limit: Math.max(limit * 5, 50),
+    });
+    const seen = new Set<string>();
+    const ordered: { account: string; threadId: string }[] = [];
+    for (const h of hits) {
+      if (!h.thread_id) continue;
+      const key = `${h.account} ${h.thread_id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      ordered.push({ account: h.account, threadId: h.thread_id });
+      if (ordered.length >= limit) break;
+    }
+    const out: ThreadRow[] = [];
+    for (const { account, threadId } of ordered) {
+      const t = this.getThread(account, threadId);
+      if (t) out.push(t);
+    }
+    return out;
+  }
+
+  /**
+   * The messages of a thread, oldest-first (M3.4 `get_thread`). Compact
+   * projection — the snippet + summary feed the agent without dumping bodies
+   * (token-conscious, SCOPE 3.4(b)); a body is opt-in via `get_message`.
+   */
+  threadMessages(account: string, threadId: string): MessageRow[] {
+    return this.#prepare(
+      `SELECT account, gmail_message_id, thread_id, subject, from_addr, to_addr,
+              cc_addr, snippet, body_state, body_text, summary_text,
+              summary_is_model, summarized_at, is_list, direction,
+              unread, starred, important, category, internal_date, indexed_at,
+              body_fetched_at
+         FROM messages
+        WHERE account = ? AND thread_id = ?
+        ORDER BY internal_date IS NULL DESC, internal_date ASC, gmail_message_id ASC`,
+    ).all(account, threadId) as unknown as MessageRow[];
+  }
+
+  /**
+   * Ranked co-recipiency neighbours of a contact (M3.4 `graph_neighbors`,
+   * PLAN §12, D9). Walks the non-list threads the contact shares with others and
+   * counts, per other contact, how many such threads they co-occur in — the same
+   * co-recipiency signal the graph engine's edges encode. Ranked by shared-thread
+   * count desc then engagement. Reads `threads.participants_json` (already
+   * restricted to non-list threads here) so it never re-walks raw messages
+   * beyond the is_list guard. Returns `[]` when the contact has no non-list
+   * co-recipients — the caller then falls back to a ranked near-miss set so a
+   * miss is never a bare empty answer (DESIGN TEST recall).
+   */
+  graphNeighbors(account: string, address: string, limit = 15): GraphNeighborRow[] {
+    const contactRows = this.#prepare(
+      `SELECT address FROM contacts WHERE account = ?`,
+    ).all(account) as { address: string }[];
+    const contactSet = new Set(contactRows.map((r) => r.address));
+
+    const threads = this.#prepare(
+      `SELECT t.participants_json AS participants_json
+         FROM threads t
+        WHERE t.account = ?
+          AND NOT EXISTS (
+            SELECT 1 FROM messages m
+             WHERE m.account = t.account AND m.thread_id = t.thread_id
+               AND m.is_list = 1
+          )`,
+    ).all(account) as { participants_json: string | null }[];
+
+    const counts = new Map<string, number>();
+    for (const t of threads) {
+      if (!t.participants_json) continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(t.participants_json);
+      } catch {
+        continue;
+      }
+      if (!Array.isArray(parsed)) continue;
+      const addrs = parsed.filter((p): p is string => typeof p === 'string' && contactSet.has(p));
+      if (!addrs.includes(address)) continue;
+      for (const other of new Set(addrs)) {
+        if (other === address) continue;
+        counts.set(other, (counts.get(other) ?? 0) + 1);
+      }
+    }
+    if (counts.size === 0) return [];
+
+    const detail = this.#prepare(
+      `SELECT display_name, domain, engagement_score, centrality, community_id
+         FROM contacts WHERE account = ? AND address = ?`,
+    );
+    const out: GraphNeighborRow[] = [];
+    for (const [other, shared] of counts) {
+      const d = detail.get(account, other) as
+        | {
+            display_name: string | null;
+            domain: string | null;
+            engagement_score: number | null;
+            centrality: number | null;
+            community_id: number | null;
+          }
+        | undefined;
+      out.push({
+        address: other,
+        display_name: d?.display_name ?? null,
+        domain: d?.domain ?? null,
+        shared_threads: shared,
+        engagement_score: d?.engagement_score ?? null,
+        centrality: d?.centrality ?? null,
+        community_id: d?.community_id ?? null,
+      });
+    }
+    out.sort(
+      (a, b) =>
+        b.shared_threads - a.shared_threads ||
+        (b.engagement_score ?? -Infinity) - (a.engagement_score ?? -Infinity) ||
+        a.address.localeCompare(b.address),
+    );
+    return out.slice(0, limit);
+  }
+
+  /**
+   * The detected social circles (M3.4 `graph_communities`, PLAN §12, D8). Groups
+   * contacts by their persisted `community_id` (set by the graph engine's
+   * Louvain pass), returning one entry per community with its top members ranked
+   * by centrality. Contacts with a null `community_id` (graph never built, or
+   * isolated) are omitted. `memberLimit` caps members per community
+   * (token-conscious). Communities are ordered by size desc.
+   */
+  graphCommunities(account: string, memberLimit = 10): {
+    communityId: number;
+    size: number;
+    members: { address: string; display_name: string | null; centrality: number | null }[];
+  }[] {
+    const rows = this.#prepare(
+      `SELECT community_id, address, display_name, centrality
+         FROM contacts
+        WHERE account = ? AND community_id IS NOT NULL
+        ORDER BY community_id ASC, centrality IS NULL, centrality DESC, address ASC`,
+    ).all(account) as {
+      community_id: number;
+      address: string;
+      display_name: string | null;
+      centrality: number | null;
+    }[];
+
+    const byCommunity = new Map<
+      number,
+      { address: string; display_name: string | null; centrality: number | null }[]
+    >();
+    for (const r of rows) {
+      let members = byCommunity.get(r.community_id);
+      if (!members) {
+        members = [];
+        byCommunity.set(r.community_id, members);
+      }
+      members.push({ address: r.address, display_name: r.display_name, centrality: r.centrality });
+    }
+
+    const out = [...byCommunity.entries()].map(([communityId, members]) => ({
+      communityId,
+      size: members.length,
+      members: members.slice(0, memberLimit),
+    }));
+    out.sort((a, b) => b.size - a.size || a.communityId - b.communityId);
+    return out;
   }
 
   // ---- interest engine surface (M2.2, PLAN §10, D12) ----------------------
