@@ -22,6 +22,7 @@ import { Repo } from '../index/repo.js';
 import { GwsAdapter } from '../source/adapters/gws/index.js';
 import type { MailScope, MailSource } from '../source/index.js';
 import { syncMetadata, type SyncResult } from '../ingest/sync.js';
+import { buildGraph } from '../graph/index.js';
 
 /** CLI-supplied sync flags (already parsed; all optional). */
 export interface SyncFlags {
@@ -75,7 +76,28 @@ export function composeScope(account: AccountConfig, flags: SyncFlags): MailScop
   return Object.keys(scope).length > 0 ? scope : undefined;
 }
 
-/** Run a single account's sync, returning the ingest layer's result. */
+/**
+ * Decide whether a sweep with these flags is a FULL or INITIAL sync — the only
+ * two triggers for the auto graph build (D10). `--all` is an explicit
+ * whole-mailbox (full) sweep; an INITIAL sync is the account's first completed
+ * `sync` run (none recorded yet *before* this sweep). Incremental sweeps
+ * (a bounded `--since`/policy sweep over an already-synced account) do NOT
+ * trigger the graph build — it is heavy relative to an incremental sweep.
+ */
+function isFullOrInitialSync(flags: SyncFlags, priorCompletedSyncs: number): boolean {
+  return Boolean(flags.all) || priorCompletedSyncs === 0;
+}
+
+/**
+ * Run a single account's sync, returning the ingest layer's result.
+ *
+ * After a FULL or INITIAL sweep (D10), auto-runs the lazy graph build
+ * ({@link buildGraph}) so centrality + communities stay current without the
+ * operator remembering a second command. The graph engine is INDEX-ONLY and
+ * derived (D8): it runs only after the sweep + aggregation have populated the
+ * `threads` rows it reads, and a failure to build the graph never fails the
+ * sync (the index is fully usable without it). Incremental sweeps skip it.
+ */
 export async function runSyncOne(
   config: OperatorConfig,
   label: string,
@@ -86,7 +108,25 @@ export async function runSyncOne(
   const account = resolveAccount(config, label);
   const source = buildSourceFn(account);
   const scope = composeScope(account, flags);
-  return syncMetadata({ account: label, source, repo, scope });
+
+  // Capture the prior completed-sync count BEFORE the sweep so "initial sync"
+  // means "no completed sync existed when this one started" (D10).
+  const priorCompletedSyncs = repo.completedSyncCount(label);
+
+  const result = await syncMetadata({ account: label, source, repo, scope });
+
+  // D10: auto graph build after a full/initial sync only. Derived + lazy (D8):
+  // never let a graph failure mask a successful sync.
+  if (isFullOrInitialSync(flags, priorCompletedSyncs)) {
+    try {
+      buildGraph(repo, label);
+    } catch {
+      // The graph layer is optional (D8); a build failure leaves the index
+      // fully functional. Swallow so sync still reports success.
+    }
+  }
+
+  return result;
 }
 
 /** Format a completed sync run as the one-line CLI summary. */

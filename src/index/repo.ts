@@ -213,6 +213,28 @@ export interface ScoredContactInput {
   engagementScore: number;
 }
 
+/**
+ * A non-list thread's participant set, the unit of co-recipiency the graph
+ * engine turns into edges (M2.3, D9, PLAN §9). One row per thread that is NOT a
+ * bulk-mail thread; `participants` is the deduped set of contact addresses on
+ * the thread (already JSON-decoded from `threads.participants_json`). Snake_case
+ * is intentionally avoided here because the value is a decoded array, not a raw
+ * SQLite scalar.
+ */
+export interface GraphThread {
+  threadId: string;
+  participants: string[];
+}
+
+/** A computed graph metric the graph engine hands back for persistence (camelCase). */
+export interface GraphMetricInput {
+  address: string;
+  /** PageRank centrality in (0, 1]; how central the contact is to the correspondence. */
+  centrality: number;
+  /** Louvain community id (a social circle), or null when the contact is isolated. */
+  communityId: number | null;
+}
+
 /** A persisted contact row (snake_case rows from SQLite). */
 export interface ContactRow {
   account: string;
@@ -608,6 +630,20 @@ export class Repo {
     return row?.id;
   }
 
+  /**
+   * Count completed (`finished_at` set, no `error`) phase-1 `sync` runs for an
+   * account. Used by the CLI to decide whether a sweep is the account's INITIAL
+   * sync (count 0 before this run) — one of the two triggers for the auto graph
+   * build (D10); the other is an explicit whole-mailbox `--all` sweep.
+   */
+  completedSyncCount(account: string): number {
+    const row = this.#prepare(
+      `SELECT count(*) c FROM sync_runs
+        WHERE account = ? AND phase = 'sync' AND finished_at IS NOT NULL AND error IS NULL`,
+    ).get(account) as { c: number };
+    return row.c;
+  }
+
   /** Close a sync_runs row with counts and optional error. */
   finishSyncRun(id: number, result: SyncRunFinish = {}): void {
     this.#prepare(
@@ -947,5 +983,106 @@ export class Repo {
       `SELECT count(*) c FROM contact_stats_snapshot WHERE account = ? AND address = ?`,
     ).get(account, address) as { c: number };
     return row.c;
+  }
+
+  // ---- graph engine surface (M2.3, PLAN §9, D8/D9) ------------------------
+  //
+  // INDEX-ONLY (PLAN §4): the graph engine reads non-list threads' participant
+  // sets and writes back `centrality` + `community_id` onto contacts, never
+  // touching a provider. Kept here (not in the graph module) so the graph layer
+  // depends only on the repo, and the core index never imports graphology (D8).
+
+  /**
+   * The co-recipiency input for the graph engine (D9, PLAN §9): the participant
+   * set of every **non-list** thread for `account`. A thread is treated as
+   * bulk (and excluded) when ANY of its messages is classified `is_list = 1` —
+   * mailing-list / announcement threads form dense cliques that would poison
+   * community detection, so D9 drops them wholesale. Threads with fewer than two
+   * participants carry no co-recipiency edge and are omitted. Participants come
+   * straight off the already-aggregated `threads.participants_json` (the
+   * aggregation pass, M2.1, owns building that set), so this is a pure derived
+   * read — the graph engine never re-walks raw messages.
+   *
+   * Participants are intersected with the account's `contacts` set: the
+   * aggregation records the user's own address among thread participants, but
+   * the user is never a contact (they sit on every thread by definition, which
+   * would otherwise make the user the universally-central node and merge every
+   * social circle). Restricting nodes to actual contacts yields the graph of
+   * "who is central to YOUR correspondence" (PLAN §9) rather than to you.
+   */
+  graphThreads(account: string): GraphThread[] {
+    const contactRows = this.#prepare(
+      `SELECT address FROM contacts WHERE account = ?`,
+    ).all(account) as { address: string }[];
+    const contactSet = new Set(contactRows.map((r) => r.address));
+
+    // A thread is "list" if any of its messages is is_list; exclude those.
+    const rows = this.#prepare(
+      `SELECT t.thread_id AS thread_id, t.participants_json AS participants_json
+         FROM threads t
+        WHERE t.account = ?
+          AND NOT EXISTS (
+            SELECT 1 FROM messages m
+             WHERE m.account = t.account
+               AND m.thread_id = t.thread_id
+               AND m.is_list = 1
+          )`,
+    ).all(account) as { thread_id: string; participants_json: string | null }[];
+
+    const out: GraphThread[] = [];
+    for (const row of rows) {
+      if (!row.participants_json) continue;
+      let participants: unknown;
+      try {
+        participants = JSON.parse(row.participants_json);
+      } catch {
+        continue;
+      }
+      if (!Array.isArray(participants)) continue;
+      const addrs = [
+        ...new Set(
+          participants.filter(
+            (p): p is string => typeof p === 'string' && contactSet.has(p),
+          ),
+        ),
+      ];
+      if (addrs.length < 2) continue;
+      out.push({ threadId: row.thread_id, participants: addrs });
+    }
+    return out;
+  }
+
+  /**
+   * Persist the graph engine's output for `account` (D8, PLAN §9): set each
+   * contact's `centrality` and `community_id`. One transaction so a build is
+   * atomic. Scores are written only for contacts that still exist (the
+   * aggregation owns row lifecycle); contacts absent from `metrics` keep their
+   * prior values, so a rebuild over a narrower graph never silently clears a
+   * contact that simply had no non-list edges this run — callers that want a
+   * clean slate pass every contact. `community_id` may be null for an isolated
+   * contact.
+   */
+  persistGraphMetrics(account: string, metrics: readonly GraphMetricInput[]): void {
+    const set = this.#prepare(
+      `UPDATE contacts SET centrality = ?, community_id = ?
+        WHERE account = ? AND address = ?`,
+    );
+    this.transaction(() => {
+      for (const m of metrics) {
+        set.run(m.centrality, m.communityId, account, m.address);
+      }
+    });
+  }
+
+  /** Fetch a contact's derived graph metrics (centrality + community_id). */
+  getGraphMetrics(
+    account: string,
+    address: string,
+  ): { centrality: number | null; community_id: number | null } | undefined {
+    return this.#prepare(
+      `SELECT centrality, community_id FROM contacts WHERE account = ? AND address = ?`,
+    ).get(account, address) as
+      | { centrality: number | null; community_id: number | null }
+      | undefined;
   }
 }

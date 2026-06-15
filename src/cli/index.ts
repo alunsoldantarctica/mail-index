@@ -27,6 +27,7 @@ import { formatResults, runSearchEnriching, type SearchFlags } from './search.js
 import { formatShow, parseRef, runShow, RefError } from './show.js';
 import { formatOpen, runOpen } from './open.js';
 import { buildStatus, formatStatus, formatStatusJson } from './status.js';
+import { formatGraphResult, runGraphBuildAll, runGraphBuildOne } from './graph.js';
 
 const USAGE = `mail-index — a local, agent-queryable mail intelligence layer
 
@@ -40,6 +41,7 @@ Commands:
   search  <terms>               Recall over the index (ranked, snippet-first)
   show    <account:message-id>  Print a message's full record (auto-enriches a meta row)
   open    <account:message-id>  Print the provider web URL for a message (no fetch)
+  graph   build                 Build the contact graph (centrality + communities)
   status                        Show per-account index freshness + counts
 
 Run 'mail-index <command> --help' for command-specific options.
@@ -105,6 +107,22 @@ Resolves the ref to its provider deep link (Gmail #all view for gws) and prints
 the URL. Does not fetch the message or touch the provider — it only needs the
 account's adapter and the message id, so it works even before the message is
 indexed.
+`;
+
+const GRAPH_USAGE = `mail-index graph — derived contact-graph analysis (lazy)
+
+Usage:
+  mail-index graph build [--account <label>]
+  mail-index graph build --all-accounts
+
+Builds the co-recipiency graph over non-list threads, runs PageRank centrality
+and Louvain community detection, and persists centrality + community_id back
+onto contacts. Reads the index only — never the provider. Heavy relative to an
+incremental sweep, so sync auto-runs it only after a full/initial sync.
+
+Options:
+  --account <label>   Account label from the operator config (required unless --all-accounts)
+  --all-accounts      Build the graph for every configured account
 `;
 
 const STATUS_USAGE = `mail-index status — per-account index freshness + counts
@@ -355,6 +373,65 @@ function cmdOpen(argv: string[]): number {
   }
 }
 
+function cmdGraph(argv: string[]): number {
+  const [sub, ...rest] = argv;
+
+  // `graph` currently has one subcommand, `build`. Treat help / missing sub as
+  // usage, and reject anything else.
+  if (sub == null || sub === '--help' || sub === '-h') {
+    process.stdout.write(GRAPH_USAGE);
+    return 0;
+  }
+  if (sub !== 'build') {
+    throw new CliError(`unknown graph subcommand "${sub}" (expected "build")`);
+  }
+
+  const { values } = parseArgs({
+    args: rest,
+    options: {
+      account: { type: 'string' },
+      'all-accounts': { type: 'boolean' },
+      help: { type: 'boolean' },
+    },
+    allowPositionals: false,
+  });
+
+  if (values.help) {
+    process.stdout.write(GRAPH_USAGE);
+    return 0;
+  }
+
+  // The graph engine is INDEX-ONLY (PLAN §4): it needs account labels, not
+  // adapter bindings, but loadConfig is still the source of truth for which
+  // accounts exist.
+  const config = loadConfig();
+  const db = openDb();
+  try {
+    const repo = new Repo(db);
+
+    if (values['all-accounts']) {
+      if (Object.keys(config.accounts).length === 0) {
+        throw new CliError('no accounts configured — run mail-index init and edit the config');
+      }
+      for (const result of runGraphBuildAll(config, repo)) {
+        process.stdout.write(formatGraphResult(result) + '\n');
+      }
+      return 0;
+    }
+
+    if (!values.account) {
+      throw new CliError('graph build requires --account <label> (or --all-accounts)');
+    }
+    // Resolve to validate the label exists in the config (throws ConfigError if not).
+    resolveAccount(config, values.account);
+    const result = runGraphBuildOne(repo, values.account);
+    process.stdout.write(formatGraphResult(result) + '\n');
+    return 0;
+  } finally {
+    db.close();
+  }
+}
+
 function cmdStatus(argv: string[]): number {
   const { values } = parseArgs({
     args: argv,
@@ -402,6 +479,8 @@ async function main(argv: string[]): Promise<number> {
       return cmdShow(rest);
     case 'open':
       return cmdOpen(rest);
+    case 'graph':
+      return cmdGraph(rest);
     case 'status':
       return cmdStatus(rest);
     default:

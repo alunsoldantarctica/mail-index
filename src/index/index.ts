@@ -16,6 +16,10 @@ export type {
   ContactRow,
   DomainRow,
   ThreadRow,
+  ContactScoringRow,
+  ScoredContactInput,
+  GraphThread,
+  GraphMetricInput,
 } from './repo.js';
 export {
   SCHEMA_VERSION,
