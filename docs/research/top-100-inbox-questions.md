@@ -14,6 +14,11 @@ Each is tagged by where the value comes from:
   where an LLM is irreducible — and where a query-based Gmail/Outlook search has
   no primitive at all (see [COMPARISON.md](../COMPARISON.md)).
 
+> **These 100 are a runnable benchmark suite.** Each question is encoded as a
+> PII-free generic query in [`bench/run.mjs`](../../bench/run.mjs) and scored for
+> tokens-to-answer (mail-index vs a stock Gmail-API MCP) via
+> `node bench/run.mjs --suite inbox100`. See [`bench/README.md`](../../bench/README.md).
+
 > **Why these categories?** They are the ones the research below independently
 > converges on. Email search is ~95% refinding/known-item lookup (not topic
 > exploration); the highest-frequency structured needs are invoices, receipts,

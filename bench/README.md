@@ -35,7 +35,17 @@ node bench/run.mjs --account unsold-group
 ANTHROPIC_API_KEY=sk-... node bench/run.mjs
 # point at a LIVE Gmail MCP's tools/list for an exact schema-tax line:
 node bench/run.mjs --gmail-tools /path/to/that-servers-tools.json
+# the 100 inbox-question suite (8 research-backed categories):
+node bench/run.mjs --suite inbox100
 ```
+
+Two suites ship via `--suite`:
+- **`default`** (30) — a tight cross-section across the four cost models.
+- **`inbox100`** — the 100 questions from
+  [`../docs/research/top-100-inbox-questions.md`](../docs/research/top-100-inbox-questions.md),
+  grouped into the 8 research categories (retrieval, finance, logistics,
+  summarization, commitments, scheduling, relationship, account). Writes to
+  `bench/RESULTS-INBOX100.md`.
 
 Output:
 - **stdout** — aggregate, shareable summary (schema tax + per-task totals + ratio).
@@ -66,9 +76,12 @@ message detail → `results-accuracy.local.md` (gitignored).
 ## Files
 
 - `run.mjs` — token harness (mail-index MCP over stdio vs Gmail API via `gws`);
-  runs a **30 common-use-case suite** (aggregation / recall / read / relational).
+  runs the **30 common-use-case suite** (`default`) or the **100 inbox-question
+  suite** (`--suite inbox100`).
 - `accuracy.mjs` — recall × token matrix (query distillation vs one mail-index phrase).
 - `RESULTS-USECASES.md` — committed 30-use-case token table (regenerate with `run.mjs`).
+- `RESULTS-INBOX100.md` — committed 100-question token table (regenerate with
+  `run.mjs --suite inbox100`).
 - `RESULTS.md` — committed aggregate recall/token table (regenerate with `accuracy.mjs`).
 - `gmail-mcp-tools.json` — a representative stock Gmail MCP tool surface, used
   only for the fixed schema-tax line. Swap in a live server's `tools/list` via
