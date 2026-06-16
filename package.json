@@ -1,9 +1,31 @@
 {
   "name": "mail-index",
-  "version": "0.0.0",
-  "description": "A local, agent-queryable mail intelligence layer.",
+  "version": "1.0.0",
+  "description": "A local, agent-queryable mail intelligence layer — progressive mailbox index + MCP server for AI agents.",
   "type": "module",
   "license": "MIT",
+  "author": "Al Ste-Marie (https://unsold.group/al)",
+  "homepage": "https://github.com/alunsoldantarctica/mail-index#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alunsoldantarctica/mail-index.git"
+  },
+  "bugs": {
+    "url": "https://github.com/alunsoldantarctica/mail-index/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "email",
+    "gmail",
+    "ai-agents",
+    "claude",
+    "local-first",
+    "sqlite",
+    "fts5",
+    "rag",
+    "mail-index"
+  ],
   "private": true,
   "engines": {
     "node": ">=24"

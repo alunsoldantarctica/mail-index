@@ -30,3 +30,6 @@ build/
 *.log
 .idea/
 .vscode/
+
+# Workflow orchestration scaffolding (internal build artifacts)
+.workflows/

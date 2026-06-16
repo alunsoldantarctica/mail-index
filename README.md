@@ -1,5 +1,10 @@
 # mail-index
 
+[![CI](https://github.com/alunsoldantarctica/mail-index/actions/workflows/ci.yml/badge.svg)](https://github.com/alunsoldantarctica/mail-index/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Node](https://img.shields.io/badge/node-%E2%89%A524-3c873a)
+![deps](https://img.shields.io/badge/native%20deps-none-brightgreen)
+
 A **local, agent-queryable mail intelligence layer**. It indexes a mailbox
 progressively (cheap metadata for everything, full bodies only where they earn
 their place), builds a graph of who and what you correspond with, infers
@@ -45,13 +50,72 @@ See [docs/PLAN.md §2](docs/PLAN.md).
 5. **Query** — your agent searches, traverses the graph, and reads the messages
    that matter, all locally via MCP.
 
+## Quick start
+
+Requires **Node 24+** and a `MailSource` (v1 ships the Gmail adapter via the
+[`gws`](docs/INSTALL.md) CLI).
+
+```sh
+git clone https://github.com/alunsoldantarctica/mail-index.git
+cd mail-index
+pnpm install && pnpm build
+
+mail-index init                              # scaffold ~/.config/mail-index/config.json
+# …edit the config to point an account label at your gws config dir…
+mail-index sync   --account acct-a --since 6mo
+mail-index graph  build --account acct-a
+mail-index search "that contract we discussed"
+```
+
+Then add the MCP server to your agent (Claude Desktop / Claude Code):
+
+```jsonc
+{ "mcpServers": { "mail-index": { "command": "mail-index-mcp" } } }
+```
+
+Full walkthrough (auth, curation, enrichment, scheduled sync, desktop-app
+gotchas) → **[docs/INSTALL.md](docs/INSTALL.md)**.
+
 ## Why not just a Gmail MCP?
 
-Stock Gmail-API MCPs are query-based lookup tools: exact queries, a network
-round-trip per call, and raw message payloads streamed into context. mail-index
-answers *vague* questions from a local recall index — measurably lighter on
-tokens (~30× less to read a message; one ranked call instead of a list→get→get
-dance). See **[docs/COMPARISON.md](docs/COMPARISON.md)** and reproduce the
+Stock Gmail-API MCPs are query-based **lookup** tools: you need the exact query,
+every call is a network round-trip, and raw message payloads (header arrays +
+base64 MIME parts) get streamed into the model's context. mail-index answers
+*vague* questions from a local **recall** index — far lighter on tokens.
+
+**Tokens to read one message** — a stock Gmail MCP hands the model the full API
+payload; mail-index returns distilled, snippet-first text:
+
+```mermaid
+xychart-beta
+    title "Tokens to put one message in context (lower is better)"
+    x-axis ["Gmail full payload", "Gmail metadata", "mail-index"]
+    y-axis "Tokens" 0 --> 6000
+    bar [5585, 2164, 171]
+```
+
+**Tokens to answer a 4-question recall suite** — Gmail must `list` (ids only)
+then `get` each candidate just to *see* what it found; mail-index answers each in
+one ranked, snippet-first call (measured on a real mailbox; reproduce below):
+
+```mermaid
+xychart-beta
+    title "Tokens to answer 4 questions (lower is better)"
+    x-axis ["Gmail API", "mail-index"]
+    y-axis "Tokens" 0 --> 50000
+    bar [48630, 2136]
+```
+
+| | Gmail API (stock MCP) | mail-index | Savings |
+|---|--:|--:|--:|
+| Read one message | ~5,585 tok | ~171 tok | **~33×** |
+| Recall (per question) | ~5,400–6,000 tok | ~550–640 tok | **~9–11×** |
+| 4-question suite (total) | 48,630 tok | 2,136 tok | **22.8×** |
+| Fixed schema tax (per turn) | ~1,367 tok (14 tools) | ~1,816 tok (18 tools) | −449 |
+
+mail-index pays a slightly higher *fixed* schema tax (more, recall-focused
+tools) and earns it back many times over on the **first question**. Full
+write-up in **[docs/COMPARISON.md](docs/COMPARISON.md)**; reproduce/extend the
 numbers with **[bench/](bench/README.md)** (`node bench/run.mjs`).
 
 ## Stack
@@ -91,6 +155,16 @@ mail-index status  [--json]              Per-account freshness + counts
 - **[docs/PLAN.md](docs/PLAN.md)** — the full spec, data model, decisions (ADR
   digest), and roadmap.
 
+## About
+
+Built by **Al Ste-Marie** — a travel & insurtech founder. I build tools that lay
+the groundwork for growing [**unsold.group**](https://unsold.group/al) into an
+AI-native company: local-first, agent-native infrastructure that gives AI real,
+queryable context to work from. mail-index is one piece of that — giving agents
+durable memory of a mailbox without handing them the keys to it.
+
+More: **[unsold.group/al](https://unsold.group/al)**
+
 ## License
 
-MIT
+[MIT](LICENSE) © Al Ste-Marie
