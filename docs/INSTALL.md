@@ -196,6 +196,27 @@ MCP client. For a Claude Code / Claude Desktop style config:
 }
 ```
 
+**Desktop apps launch with a minimal environment** — two practical notes if the
+server fails to start or `get_message` can't enrich:
+
+- **Node:** if you use a version manager (fnm/nvm/asdf), `mail-index-mcp` may not
+  be on the app's `PATH`. Point `command` at an absolute Node binary and the
+  built entrypoint instead:
+  ```jsonc
+  {
+    "mcpServers": {
+      "mail-index": {
+        "command": "/abs/path/to/node",
+        "args": ["/abs/path/to/mail-index/dist/mcp/index.js"],
+        "env": { "PATH": "/dir/with/your/adapter/bin:/usr/local/bin:/usr/bin:/bin" }
+      }
+    }
+  }
+  ```
+- **Adapter binary:** `get_message`'s inline enrich shells out to the adapter CLI
+  (e.g. `gws`). Add the directory holding that binary to the server's `env.PATH`
+  (above) so the app can find it. Restart the desktop app after editing the config.
+
 The server is **read-only on the mailbox**: the only provider contact it ever
 makes is `get_message`'s single inline body fetch
 ([ADR-0001](adr/0001-inline-enrichment-is-o1-only.md)). Everything bulk (sync,
