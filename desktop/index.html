@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>mail-index</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>mail-index</h1>
+        <p class="sub">Set up local, private mail search for your AI assistant.</p>
+      </header>
+
+      <section class="account-bar">
+        <label for="email">Google account</label>
+        <input id="email" type="email" placeholder="you@gmail.com" autocomplete="email" />
+        <label for="label">Label</label>
+        <input id="label" type="text" placeholder="personal" value="personal" />
+      </section>
+
+      <ol class="stepper" id="stepper">
+        <li class="step" data-step="prereqs">
+          <div class="dot" data-status="pending"></div>
+          <div class="body">
+            <h2>1. Install prerequisites</h2>
+            <p>Installs the <code>gog</code> helper and verifies the bundled <code>mail-index</code> CLI.</p>
+            <button data-action="prereqs">Install</button>
+          </div>
+        </li>
+        <li class="step" data-step="signin">
+          <div class="dot" data-status="pending"></div>
+          <div class="body">
+            <h2>2. Sign in with Google</h2>
+            <p>Opens your browser for read-only Gmail access. Nothing is sent anywhere but your machine.</p>
+            <button data-action="signin">Sign in</button>
+          </div>
+        </li>
+        <li class="step" data-step="sync">
+          <div class="dot" data-status="pending"></div>
+          <div class="body">
+            <h2>3. Sync now</h2>
+            <p>Indexes the last month of mail locally so it can be searched offline.</p>
+            <button data-action="sync">Sync</button>
+          </div>
+        </li>
+        <li class="step" data-step="mcp">
+          <div class="dot" data-status="pending"></div>
+          <div class="body">
+            <h2>4. Connect to Claude</h2>
+            <p>Shows the config snippet to paste into your AI assistant.</p>
+            <button data-action="mcp">Show config</button>
+          </div>
+        </li>
+      </ol>
+
+      <section class="log">
+        <div class="log-head">
+          <h3>Activity log</h3>
+          <button id="refresh" class="ghost">Refresh status</button>
+        </div>
+        <pre id="log" aria-live="polite"></pre>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

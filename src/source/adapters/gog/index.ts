@@ -1,12 +1,11 @@
 /**
- * The gog `MailSource` adapter (adapter #2 — the public, one-click-auth path).
+ * The gog `MailSource` adapter (adapter #2 — the recommended Gmail transport).
  *
- * Wraps the gog CLI (github.com/steipete/gogcli) by shelling out (via an
- * injectable {@link GogRunner}). gog ships its own bundled OAuth client and a
- * browser sign-in flow (`gog auth add <email>`), so a public user authenticates
- * with no Google Cloud project of their own — the friction the gws path carries.
- * The mailbox is selected per call with `-a <account>` (the account email),
- * not a config dir: gog keeps its own tokens.
+ * Wraps the gog CLI (github.com/openclaw/gogcli) by shelling out (via an
+ * injectable {@link GogRunner}). gog needs a Google OAuth client (its own or a
+ * shared one) configured via `gog auth credentials set` before `gog auth add`;
+ * it then keeps its own tokens. The mailbox is selected per call with
+ * `-a <account>` (the account email), not a config dir.
  *
  * Method → gog call mapping (the runner appends `-j --gmail-no-send`):
  *  - {@link GogAdapter.check}       `auth list`                       (is this account authorized?)

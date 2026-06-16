@@ -72,7 +72,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 {"jsonrpc":"2.0","method":"notifications/initialized"}
 {"jsonrpc":"2.0","id":2,"method":"tools/list"}' | mail-index-mcp | grep -o '"name":"[a-z_]*"'
 
-# 5. Released with provenance — verify the npm artifact came from this repo + CI:
+# 5. (After the first published release) verify the npm artifact's provenance:
 npm audit signatures
 ```
 

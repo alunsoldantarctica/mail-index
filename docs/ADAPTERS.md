@@ -7,11 +7,12 @@ layer talks to the MailSource adapter"). Keeping the provider behind this
 interface keeps each provider's setup tax a **swappable** concern, not a
 permanent one.
 
-Two Gmail adapters ship today: the **gws adapter** (Gmail via Google's `gws`
-CLI — bring-your-own OAuth client) and the **gog adapter** (Gmail via the
-[`gog`](https://github.com/steipete/gogcli) CLI, which carries its own bundled
-OAuth client, so `gog auth add <email>` signs in with no Google Cloud project —
-the public, one-click-auth path). Both share the Gmail-REST → neutral-record
+Two Gmail adapters ship today, both read-only and both needing a Google OAuth
+client (their own or a shared one — gog does **not** ship a working built-in
+client): the **gog adapter** (recommended — Gmail via the
+[`gog`](https://github.com/openclaw/gogcli) CLI; Homebrew-installable, clean
+JSON, `--gmail-no-send`) and the **gws adapter** (Gmail via Google's
+[`gws`](https://github.com/googleworkspace/cli) CLI). Both share the Gmail-REST → neutral-record
 mapping in `src/source/adapters/gmail-shared.ts`. IMAP and other providers are
 future work. This document is for anyone writing a new one.
 
