@@ -20,4 +20,19 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // Plain Node ESM scripts (e.g. bench/) — declare the Node globals they use.
+    files: ['**/*.mjs', '**/*.cjs'],
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: 'module',
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+        fetch: 'readonly',
+        URL: 'readonly',
+        Buffer: 'readonly',
+      },
+    },
+  },
 );
