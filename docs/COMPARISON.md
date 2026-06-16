@@ -49,9 +49,16 @@ model needs.
 → Gmail's `list` returns no snippets, so the agent must fetch each candidate just
 to *see what it is*. mail-index returns ranked snippets in a single call.
 
-**Fixed schema tax** (injected every turn): mail-index's 18 tools cost ~1,900
-tokens of schema — comparable to a full Gmail MCP's send/label/delete surface,
-but every one of mail-index's tools serves *recall*, not mailbox mutation.
+**Fixed schema tax** (injected every turn) — the one place mail-index costs
+*more*, honestly: its 18 recall tools are ~1,800 schema tokens vs ~1,400 for a
+stock Gmail MCP's 14 send/label/delete tools. That ~400-token premium buys the
+recall surface (`find_person`, graph, curation, `catch_up`) — and it is repaid
+on the **first question**, where the per-task savings are 9–80×.
+
+**Measured aggregate** (4-task suite, real `personal` mailbox, `bench/run.mjs`):
+per-task result tokens **2,136 (mail-index) vs 48,630 (Gmail API) — 22.8× less**
+(recall tasks ~9–11×; reading one full message 80×+). Reproduce / extend the
+suite yourself; numbers scale with mailbox content.
 
 ## Why it's also faster (wall-clock, not just tokens)
 
