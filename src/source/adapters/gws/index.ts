@@ -24,13 +24,13 @@
  * the ingest layer distills.
  */
 
-import type {
-  MailScope,
-  MailSource,
-  MessageFull,
-  MessageMetadata,
-  SourceIdentity,
-} from '../../index.js';
+import type { MailScope, MailSource, MessageFull, MessageMetadata, SourceIdentity } from '../../index.js';
+import {
+  type GmailMessage,
+  buildGmailQuery,
+  extractBodies,
+  toMetadata,
+} from '../gmail-shared.js';
 import { type GwsRunner, GwsError, spawnGwsRunner } from './runner.js';
 
 /** Construction options for {@link GwsAdapter}. */
@@ -58,115 +58,9 @@ interface GmailListResponse {
   nextPageToken?: string;
 }
 
-/** A header entry in a Gmail message payload. */
-interface GmailHeader {
-  name?: string;
-  value?: string;
-}
-
-/** A Gmail message payload (recursive: MIME parts nest payloads). */
-interface GmailPayload {
-  mimeType?: string;
-  headers?: GmailHeader[];
-  body?: { data?: string; size?: number };
-  parts?: GmailPayload[];
-}
-
-/** Gmail `messages.get` response (the fields the adapter maps). */
-interface GmailMessage {
-  id?: string;
-  threadId?: string;
-  labelIds?: string[];
-  snippet?: string;
-  internalDate?: string;
-  sizeEstimate?: number;
-  payload?: GmailPayload;
-}
-
 /** Gmail `users.getProfile` response. */
 interface GmailProfile {
   emailAddress?: string;
-}
-
-/**
- * Collect every header on a payload into a name → value bag (§8: the complete,
- * unrestricted header set classification needs for `List-*` presence). Last
- * value wins on a duplicate header name — presence is all classification reads.
- */
-function headerBag(payload: GmailPayload | undefined): Record<string, string> {
-  const bag: Record<string, string> = {};
-  for (const h of payload?.headers ?? []) {
-    if (h.name != null && h.value != null) bag[h.name] = h.value;
-  }
-  return bag;
-}
-
-/** Case-insensitive lookup of a single header value from a payload. */
-function header(payload: GmailPayload | undefined, name: string): string | null {
-  const headers = payload?.headers;
-  if (!headers) return null;
-  const want = name.toLowerCase();
-  for (const h of headers) {
-    if (h.name?.toLowerCase() === want) return h.value ?? null;
-  }
-  return null;
-}
-
-/** Decode a Gmail base64url body part to a UTF-8 string. */
-function decodeBody(data: string | undefined): string | null {
-  if (!data) return null;
-  // Gmail uses base64url (`-`/`_`); Buffer's 'base64url' handles it directly.
-  return Buffer.from(data, 'base64url').toString('utf8');
-}
-
-/**
- * Walk a Gmail payload tree collecting the first text/plain and first text/html
- * body parts. Returns the decoded bodies + the mimeType the body was sourced
- * from (text/plain preferred for the distiller's `mimeType` hint).
- */
-function extractBodies(payload: GmailPayload | undefined): {
-  bodyText: string | null;
-  bodyHtml: string | null;
-  mimeType: string | null;
-} {
-  let bodyText: string | null = null;
-  let bodyHtml: string | null = null;
-
-  const visit = (p: GmailPayload | undefined): void => {
-    if (!p) return;
-    const mime = p.mimeType ?? '';
-    if (mime === 'text/plain' && bodyText === null) {
-      bodyText = decodeBody(p.body?.data);
-    } else if (mime === 'text/html' && bodyHtml === null) {
-      bodyHtml = decodeBody(p.body?.data);
-    }
-    // A non-multipart message carries its body on the top-level payload with no
-    // parts; multipart messages nest text/* under `parts` (possibly deeper).
-    if (p.parts) for (const child of p.parts) visit(child);
-  };
-  visit(payload);
-
-  const mimeType = bodyText !== null ? 'text/plain' : bodyHtml !== null ? 'text/html' : null;
-  return { bodyText, bodyHtml, mimeType };
-}
-
-/** Map a Gmail message resource to the provider-neutral metadata shape. */
-function toMetadata(msg: GmailMessage): MessageMetadata {
-  const internal = msg.internalDate;
-  return {
-    id: msg.id ?? '',
-    threadId: msg.threadId ?? null,
-    internalDate: internal != null && internal !== '' ? Number(internal) : null,
-    dateHeader: header(msg.payload, 'Date'),
-    from: header(msg.payload, 'From'),
-    to: header(msg.payload, 'To'),
-    cc: header(msg.payload, 'Cc'),
-    subject: header(msg.payload, 'Subject'),
-    labels: msg.labelIds ?? [],
-    snippet: msg.snippet ?? null,
-    sizeEstimate: msg.sizeEstimate ?? null,
-    headers: headerBag(msg.payload),
-  };
 }
 
 export class GwsAdapter implements MailSource {
@@ -208,14 +102,10 @@ export class GwsAdapter implements MailSource {
   }
 
   async *listIds(scope: MailScope = {}): AsyncIterable<string> {
-    // Build the Gmail search query from the scope. `includeSent !== false`
-    // keeps Sent in scope (D11); `includeSent: false` excludes it via a query
-    // term. `since`/`query` are passed through as Gmail search terms.
-    const terms: string[] = [];
-    if (scope.query) terms.push(scope.query);
-    if (scope.since) terms.push(`newer_than:${normaliseSince(scope.since)}`);
-    if (scope.includeSent === false) terms.push('-in:sent');
-    const q = terms.join(' ').trim();
+    // Build the Gmail search query from the scope (shared with the gog adapter).
+    // `includeSent !== false` keeps Sent in scope (D11); `includeSent: false`
+    // excludes it; `since`/`query` pass through as Gmail search terms.
+    const q = buildGmailQuery(scope);
 
     const limit = scope.limit;
     let emitted = 0;
@@ -293,17 +183,6 @@ export class GwsAdapter implements MailSource {
     const { bodyText, bodyHtml, mimeType } = extractBodies(res.payload);
     return { ...toMetadata(res), bodyText, bodyHtml, mimeType };
   }
-}
-
-/**
- * Normalise a `since` token to a Gmail `newer_than:` argument. Gmail accepts
- * `Nd`/`Nm`/`Ny`; the CLI/scope also allows `1mo`. ISO-8601 dates and unknown
- * tokens pass through unchanged (Gmail also accepts `newer_than:YYYY/MM/DD`).
- */
-function normaliseSince(since: string): string {
-  const mo = /^(\d+)mo$/.exec(since.trim());
-  if (mo) return `${mo[1]}m`;
-  return since.trim();
 }
 
 export { GwsError } from './runner.js';

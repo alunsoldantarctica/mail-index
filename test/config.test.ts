@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  ADAPTERS,
   ConfigError,
   validateConfig,
   resolveAccount,
@@ -123,10 +124,12 @@ test('the shipped config.example.json is valid against the loader', () => {
   const p = join(REPO_ROOT, 'config.example.json');
   const cfg = loadConfig(p);
   assert.ok(Object.keys(cfg.accounts).length >= 1);
-  // Placeholder-only: example must not carry a real-looking address as configDir.
+  // Each account carries the binding its adapter requires: gws → configDir,
+  // gog → account email. Placeholder-only (no real data, 2a/2b boundary).
   for (const acct of Object.values(cfg.accounts)) {
-    assert.equal(acct.adapter, 'gws');
-    assert.ok(acct.configDir.length > 0);
+    assert.ok((ADAPTERS as readonly string[]).includes(acct.adapter));
+    if (acct.adapter === 'gws') assert.ok((acct.configDir ?? '').length > 0);
+    else assert.ok((acct.account ?? '').length > 0);
   }
   // Sanity: the raw file uses example placeholders, never real data (2a/2b).
   assert.match(readFileSync(p, 'utf8'), /example\.com|acct-/);

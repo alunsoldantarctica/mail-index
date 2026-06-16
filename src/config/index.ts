@@ -38,8 +38,13 @@ export class ConfigError extends Error {
   override name = 'ConfigError';
 }
 
-/** Adapter identifiers the tool knows how to build (D1: gws is adapter #1). */
-export const ADAPTERS = ['gws'] as const;
+/**
+ * Adapter identifiers the tool knows how to build. `gws` (adapter #1, D1) shells
+ * out to the Google Workspace CLI with a per-account config dir; `gog` (adapter
+ * #2) shells out to the gog CLI, which carries its own bundled OAuth client and
+ * selects the mailbox by account email — the public, one-click-auth path.
+ */
+export const ADAPTERS = ['gws', 'gog'] as const;
 export type AdapterId = (typeof ADAPTERS)[number];
 
 /**
@@ -63,10 +68,16 @@ export interface AccountConfig {
   /** Which `MailSource` adapter backs this account. */
   adapter: AdapterId;
   /**
-   * Adapter config directory. For gws this is the per-account
-   * `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` (the wrapper's isolated mailbox config).
+   * Adapter config directory. Required for `gws` (the per-account
+   * `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` — the wrapper's isolated mailbox config);
+   * unused by `gog`, which keeps its own tokens.
    */
-  configDir: string;
+  configDir?: string;
+  /**
+   * Mailbox email address. Required for `gog` (the account gog selects with
+   * `-a` and that `gog auth add` authorized); unused by `gws`.
+   */
+  account?: string;
   /** Optional default sync policy for this account. */
   syncPolicy?: SyncPolicy;
 }
@@ -137,14 +148,26 @@ export function validateConfig(parsed: unknown, source = '<config>'): OperatorCo
       );
     }
 
-    const configDir = raw['configDir'];
-    if (typeof configDir !== 'string' || configDir.trim() === '') {
-      throw new ConfigError(
-        `${source}: account "${label}" is missing a non-empty string "configDir"`,
-      );
+    // Adapter-specific binding: gws needs a configDir; gog needs an account
+    // email. Validate the field the chosen adapter requires.
+    const account: AccountConfig = { adapter: adapter as AdapterId };
+    if (adapter === 'gog') {
+      const email = raw['account'];
+      if (typeof email !== 'string' || email.trim() === '') {
+        throw new ConfigError(
+          `${source}: account "${label}" (adapter "gog") is missing a non-empty string "account" (the mailbox email)`,
+        );
+      }
+      account.account = email;
+    } else {
+      const configDir = raw['configDir'];
+      if (typeof configDir !== 'string' || configDir.trim() === '') {
+        throw new ConfigError(
+          `${source}: account "${label}" (adapter "${adapter}") is missing a non-empty string "configDir"`,
+        );
+      }
+      account.configDir = configDir;
     }
-
-    const account: AccountConfig = { adapter: adapter as AdapterId, configDir };
 
     if ('syncPolicy' in raw && raw['syncPolicy'] !== undefined) {
       account.syncPolicy = validateSyncPolicy(raw['syncPolicy'], `${source}: account "${label}"`);

@@ -16,6 +16,14 @@
         "limit": 5000,
         "includeSent": false
       }
+    },
+    "personal": {
+      "adapter": "gog",
+      "account": "you@gmail.com",
+      "syncPolicy": {
+        "since": "1mo",
+        "includeSent": true
+      }
     }
   }
 }

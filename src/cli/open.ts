@@ -35,8 +35,10 @@ import { RefError, type MessageRef } from './show.js';
 export function providerUrl(account: AccountConfig, id: string): string {
   switch (account.adapter) {
     case 'gws':
+    case 'gog':
       // Gmail `#all` deep link: resolves the message id from any folder/label;
       // `/u/0` = first signed-in profile (Gmail redirects to the right one).
+      // Both Gmail-backed adapters share the same web URL shape.
       return `https://mail.google.com/mail/u/0/#all/${id}`;
     default: {
       // Exhaustiveness guard: a new adapter id must add its URL shape here too.

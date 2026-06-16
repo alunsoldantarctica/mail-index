@@ -434,6 +434,15 @@ export interface InterestProfileRow {
   updated_at: string | null;
 }
 
+/** A row of `account_identity`: the mailbox a label is pinned to (migration 3). */
+export interface AccountIdentityRow {
+  account: string;
+  address: string;
+  provider: string | null;
+  first_seen: string | null;
+  last_verified: string | null;
+}
+
 export class Repo {
   readonly db: DatabaseSync;
 
@@ -2155,5 +2164,36 @@ export class Repo {
          updated_at    = excluded.updated_at`,
     ).run(account, JSON.stringify([...keywords]), updatedAt);
     return updatedAt;
+  }
+
+  /**
+   * The authenticated mailbox identity an account label is bound to, or null if
+   * the label has never recorded one (its first sync). Used by the sync identity
+   * guard to keep a label pinned to one mailbox across an adapter switch.
+   */
+  getAccountIdentity(account: string): AccountIdentityRow | null {
+    const row = this.#prepare(
+      `SELECT account, address, provider, first_seen, last_verified
+         FROM account_identity WHERE account = ?`,
+    ).get(account) as AccountIdentityRow | undefined;
+    return row ?? null;
+  }
+
+  /**
+   * Record (or refresh) the authenticated mailbox identity for an account label.
+   * On first sight stamps `first_seen`; every call refreshes `last_verified` and
+   * the verifying `provider`. The bound `address` itself is never rewritten once
+   * set (the guard blocks a mismatch before this is called), so a transport
+   * switch to the same mailbox just updates `provider`/`last_verified`.
+   */
+  setAccountIdentity(account: string, address: string, provider: string, at?: string): void {
+    const now = at ?? new Date().toISOString();
+    this.#prepare(
+      `INSERT INTO account_identity (account, address, provider, first_seen, last_verified)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(account) DO UPDATE SET
+         provider      = excluded.provider,
+         last_verified = excluded.last_verified`,
+    ).run(account, address, provider, now, now);
   }
 }

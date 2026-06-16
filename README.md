@@ -52,18 +52,21 @@ See [docs/PLAN.md §2](docs/PLAN.md).
 
 ## Quick start
 
-Requires **Node 24+** and a `MailSource` (v1 ships the Gmail adapter via the
-[`gws`](docs/INSTALL.md) CLI).
+Requires **Node 24+** and a Gmail `MailSource` adapter — **`gog`** (recommended)
+or **`gws`**. Reading Gmail needs a Google OAuth client, and you get one **two
+ways**: use the **mail-index beta client** (skip Google Cloud entirely; ~100-user
+beta cap) or **bring your own** Google Cloud client (no cap — we walk you through
+it). See [docs/INSTALL.md §2](docs/INSTALL.md#2-connect-a-mailbox-pick-an-oauth-path)
+and [docs/oauth-and-verification.md](docs/oauth-and-verification.md).
 
 ```sh
 git clone https://github.com/alunsoldantarctica/mail-index.git
 cd mail-index
 pnpm install && pnpm build
 
-mail-index init                              # scaffold ~/.config/mail-index/config.json
-# …edit the config to point an account label at your gws config dir…
-mail-index sync   --account acct-a --since 6mo
-mail-index graph  build --account acct-a
+mail-index setup                             # installs the adapter, signs you in, scaffolds config
+mail-index sync   --account personal --since 6mo
+mail-index graph  build --account personal
 mail-index search "that contract we discussed"
 ```
 
@@ -218,8 +221,9 @@ or PR to add a comparable tool (or correct how one is described).
 ## Stack
 
 TypeScript · `node:sqlite` (no native deps) · SQLite FTS5 · Graphology ·
-`@modelcontextprotocol/sdk`. Node 24+. Pluggable `MailSource` adapters; v1 ships
-the Gmail adapter (via the `gws` CLI).
+`@modelcontextprotocol/sdk`. Node 24+. Pluggable `MailSource` adapters; ships two
+Gmail transports — [`gog`](https://github.com/openclaw/gogcli) (recommended) and
+Google's [`gws`](https://github.com/googleworkspace/cli).
 
 ## CLI
 

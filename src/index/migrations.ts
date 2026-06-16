@@ -186,8 +186,46 @@ const m002_thread_summary: Migration = {
   },
 };
 
+/**
+ * Migration 3 — per-account mailbox identity (adapter-switch safety).
+ *
+ * An account label is the durable index key — `messages` is keyed by
+ * `(account, gmail_message_id)`, and Gmail message ids are identical whichever
+ * CLI (`gws`, `gog`) fetched them. So a user can switch a label's transport
+ * between adapters and the cached index stays fully valid: a re-sync only pulls
+ * new mail (upsert is idempotent). The one footgun is pointing a label at a
+ * *different mailbox* (e.g. authenticating the new adapter as another address),
+ * which would silently mix two mailboxes' mail under one label.
+ *
+ * This table records the authenticated address the label is bound to (captured
+ * on first sync). The sync identity probe then asserts the adapter still
+ * resolves to that same address before reusing the index — the provider may
+ * change freely, the mailbox identity may not. `provider` is informational
+ * (which adapter last verified the binding).
+ */
+const m003_account_identity: Migration = {
+  version: 3,
+  name: 'account identity (adapter-switch safety)',
+  up: (db) => {
+    db.exec(`
+      CREATE TABLE account_identity (
+        account       TEXT NOT NULL,
+        address       TEXT NOT NULL,
+        provider      TEXT,
+        first_seen    TEXT,
+        last_verified TEXT,
+        PRIMARY KEY (account)
+      );
+    `);
+  },
+};
+
 /** All migrations, in ascending version order. Append-only. */
-export const MIGRATIONS: readonly Migration[] = [m001_initial, m002_thread_summary];
+export const MIGRATIONS: readonly Migration[] = [
+  m001_initial,
+  m002_thread_summary,
+  m003_account_identity,
+];
 
 /** Read the database's applied schema version (SQLite `user_version`). */
 export function getUserVersion(db: DatabaseSync): number {
