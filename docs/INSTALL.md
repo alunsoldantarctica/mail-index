@@ -273,7 +273,49 @@ the sync on a slower cadence.)
 
 ---
 
-## 9. Privacy & data hygiene
+## 9. Grow your index intelligently
+
+The whole design is **metadata-wide, bodies-narrow**: index everything cheaply,
+fetch full text only where it earns its place. That keeps the index tiny (~1.6 KB
+per message — ~1.5% of your mailbox size, since it stores metadata + snippets,
+not attachments) and lets you get value in minutes instead of waiting on a full
+sync. A sensible growth path:
+
+1. **Start recent and cheap.** A first metadata sync runs ~50 messages/min
+   (one provider call each), so don't pull years up front:
+   ```sh
+   mail-index sync --account acct-a --since 1mo     # minutes; searchable immediately
+   ```
+2. **Build structure + curate.** Let the engines find who/what matters, then tell
+   it what you care about:
+   ```sh
+   mail-index graph build --account acct-a          # contacts, centrality, communities
+   mail-index curate --account acct-a               # mark important / muted + keywords
+   ```
+3. **Enrich only what matters.** Bodies are fetched selectively from your curated
+   profile — the index stays small:
+   ```sh
+   mail-index enrich --profile --account acct-a
+   ```
+4. **Expand the window over time.** Re-sync with a larger lookback as a background
+   job; sync is incremental and idempotent, so this only fetches what's new/older:
+   ```sh
+   mail-index sync --account acct-a --since 6mo     # then --since 1y, or --all
+   ```
+5. **Let summaries keep it lean.** When your agent summarizes bulk mail
+   (`save_summary`), `mail-index compact` demotes those distilled bodies to
+   summary-only after a grace window — read-once newsletters cost ~0.5 KB forever
+   ([ADR-0003](adr/0003-agent-written-summaries-and-body-demotion.md)).
+6. **Schedule freshness** (§8) so recent mail stays current without you thinking
+   about it.
+
+**Rule of thumb for sizing:** index size ≈ messages × ~1.6 KB (metadata), plus
+~1–3 KB for each body you enrich. 10k messages ≈ ~16 MB; enriching 1k of them
+≈ +~2 MB. It scales with message *count*, not mailbox bytes.
+
+---
+
+## 10. Privacy & data hygiene
 
 - **Local-first.** The index, bodies, and profile never leave your machine. No
   telemetry, no account, no cloud

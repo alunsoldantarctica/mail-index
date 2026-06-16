@@ -1,4 +1,4 @@
-# mail-index — Architecture & Build Plan
+# mail-index — Architecture & Data Model
 
 > A local, agent-queryable mail intelligence layer. It indexes a user's mailbox
 > progressively (metadata first, bodies on demand), builds a graph of who and
@@ -6,9 +6,9 @@
 > user curate who/what matters, and exposes the whole thing to AI agents
 > (Claude, Codex, any MCP client) through a local MCP server.
 
-Status: **planning**. A working single-file prototype exists (Node + SQLite
-FTS5, two-phase progressive sync). This document is the spec for turning that
-prototype into a proper, repeatable, open-source tool.
+Status: **v1.0, shipped.** This document describes the architecture, data model,
+and the key design decisions (ADR digest). It's a reference for contributors; the
+decisions themselves live as ADRs in [`adr/`](adr/).
 
 ---
 
@@ -98,7 +98,7 @@ and used only as a real-world test of the generic tool.
 ### Non-goals (v1)
 - Not an email client; never sends mail, never mutates the mailbox.
 - No server, no cloud, no account — strictly local.
-- No embeddings/topic clustering in v1 (deferred; see §10/§18).
+- No embeddings/topic clustering (deferred).
 - No cross-person identity resolution in v1 (deferred).
 - Not provider-locked, but only one adapter (Gmail via `gws`) ships in v1.
 
@@ -324,8 +324,7 @@ for users with no agent, so the tool is not useless without an MCP client.
 drives which bodies get fetched. Curation is editable and the change history is
 recoverable (snapshots + `updated_at`).
 
-v1 curates **contacts, domains, and freeform interest keywords** — no clustering.
-(Real topics arrive in v1.1; see §18.)
+It curates **contacts, domains, and freeform interest keywords** — no clustering.
 
 ---
 
@@ -472,45 +471,7 @@ mail-index/
 
 ---
 
-## 18. Roadmap
-
-**v0.x — extract & harden (from prototype).**
-- Port the working prototype into the layered TS structure (D1–D3).
-- `MailSource` interface + `GwsAdapter`. Schema in `node:sqlite`. Sync + enrich +
-  classification with tests. `status`. `.gitignore` + LICENSE + README.
-
-**v1.0 — the thesis.**
-- Sent-mail indexing (D11) + interest engine + snapshots (D12).
-- Graph engine (Graphology, D8–D10).
-- Curation: MCP tools + CLI wizard (D14); profile-driven enrichment.
-- MCP server with the §12 surface. INSTALL/MCP/ADAPTERS docs.
-- `status --json` + documented launchd/cron snippet in INSTALL.md (scheduled
-  freshness; ADR-0005 lazy syncs become the fallback, not the main path).
-
-**v1.1 — depth.**
-- **Topics** — start cheap (subject-keyword + sender-derived tags), *then*
-  evaluate local embeddings (transformers.js) + clustering. Not before.
-- **Person-unification** — heuristic identity resolution (display name + domain +
-  reply-pairing) populating `person_id`.
-- **Trend** — analyze `contact_stats_snapshot` for rising/falling engagement.
-
-**v1.x — reach.**
-- Second adapter: **DirectGmailAdapter** (bundled published OAuth app → no gcloud/
-  GCP project for adopters) — the real onboarding-friction killer (D1).
-- Single-binary distribution (Bun `--compile` / Node SEA, D4).
-- `mail-index schedule install --interval 30m` (generates launchd plist /
-  systemd user timer) + SwiftBar/xbar tray plugin in `contrib/` (menu-bar
-  freshness, "Sync now"). A real Tauri tray app only if demand, as a
-  companion repo.
-- MCP sync-status resource + `resources/updated` subscription push (ADR-0005).
-- Optional: IMAP adapter; MCP elicitation once client support is real.
-
-**v2 — research.** Literal node/edge graph + richer community/topic modeling;
-possible Rust port of the settled core (D5).
-
----
-
-## 19. Testing
+## 18. Testing
 
 - **Unit:** classification (category/is_list/direction), HTML→text extraction,
   scoring math, query builders.
@@ -519,20 +480,5 @@ possible Rust port of the settled core (D5).
 - **Index integration:** sync→enrich→search→graph over a synthetic fixture
   mailbox; assert counts, FTS hits, score ordering, community assignment.
 - **MCP:** tool schema + golden-response tests against a seeded fixture DB.
-- No live-mailbox tests in CI; the maintainer's instance (2b) is the live
+- No live-mailbox tests in CI; an operator instance (2b) is the live
   end-to-end smoke.
-
----
-
-## 20. Open questions
-
-- **Name.** `mail-index` is the working name; a more brandable OSS name is open.
-- **License.** MIT assumed; confirm.
-- **Enrichment execution model.** CLI-only vs an optional local daemon the MCP
-  server can hand long enrichments to (so agents never block on a multi-minute
-  fetch). Leaning CLI-first, daemon in v1.x.
-- **At-rest encryption default.** Document-and-opt-in vs on-by-default (SQLCipher
-  adds a native dep, conflicting with D2 — likely document-and-opt-in).
-- **Public vs private repo at launch.** Start private (clean it up), flip public
-  for v1.0.
-```

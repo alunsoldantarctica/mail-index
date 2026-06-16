@@ -76,6 +76,26 @@ Then add the MCP server to your agent (Claude Desktop / Claude Code):
 Full walkthrough (auth, curation, enrichment, scheduled sync, desktop-app
 gotchas) → **[docs/INSTALL.md](docs/INSTALL.md)**.
 
+## What to expect — time & storage
+
+mail-index keeps **metadata for every message and full text only where it earns
+it**, so the index is tiny next to your mailbox and grows with message *count*,
+not mailbox size — a 5 MB email with attachments is still ~2 KB in the index.
+(Measured on a real 6-month, ~8,000-message mailbox.)
+
+| Your mailbox | Index size (metadata) | First sync (one-time) |
+|---|--:|--:|
+| 1,000 messages | ~1.6 MB | ~15–20 min |
+| 10,000 messages | ~16 MB | run as a background job |
+| ~1 GB of Gmail (~9–10k msgs) | ~16 MB (**~1.5%** of mailbox) | run as a background job |
+
+Metadata sync runs **~50 messages/min** through the Gmail adapter (one provider
+call per message — network-bound, one-time; incremental after). Searching the
+local index is instant. Enriching a message's body later adds ~1–3 KB each, only
+for the messages you choose. **Tip:** start with a recent window
+(`--since 1mo`) for value in minutes, then expand — see
+[Grow your index intelligently](docs/INSTALL.md#9-grow-your-index-intelligently).
+
 ## Why not just a Gmail MCP?
 
 Stock Gmail-API MCPs are query-based **lookup** tools: you need the exact query,
@@ -170,19 +190,19 @@ mail-index status  [--json]              Per-account freshness + counts
   command-handback contracts.
 - **[docs/ADAPTERS.md](docs/ADAPTERS.md)** — the `MailSource` contract and how to
   write + contract-test a new adapter.
-- **[docs/PLAN.md](docs/PLAN.md)** — the full spec, data model, decisions (ADR
-  digest), and roadmap.
+- **[docs/PLAN.md](docs/PLAN.md)** — architecture, data model, and the key
+  decisions (ADR digest).
 
 ## About
 
-Built by **Al Ste-Marie** — a travel & insurtech founder. I build tools that lay
-the groundwork for growing [**unsold.group**](https://unsold.group/al) into an
-AI-native company: local-first, agent-native infrastructure that gives AI real,
-queryable context to work from. mail-index is one piece of that — giving agents
-durable memory of a mailbox without handing them the keys to it.
+Built by **[Unsold Group](https://unsold.group/al)** — a travel & insurtech
+company building the groundwork to operate as an AI-native business: local-first,
+agent-native infrastructure that gives AI real, queryable context to work from.
+mail-index is one piece of that — giving agents durable memory of a mailbox
+without handing them the keys to it.
 
 More: **[unsold.group/al](https://unsold.group/al)**
 
 ## License
 
-[MIT](LICENSE) © Al Ste-Marie
+[MIT](LICENSE)

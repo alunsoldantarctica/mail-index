@@ -114,7 +114,7 @@ interface MessageFull extends MessageMetadata {
    (`buildSource` in `src/cli/sync.ts`) so your adapter is instantiated for its
    accounts.
 4. **Record fixtures** covering at least a direct, a list, and a sent message
-   (PLAN §19 calls for breadth), plus a fixture-backed runner that replays them.
+   (PLAN §18 calls for breadth), plus a fixture-backed runner that replays them.
 
 ---
 

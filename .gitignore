@@ -33,3 +33,6 @@ build/
 
 # Workflow orchestration scaffolding (internal build artifacts)
 .workflows/
+
+# Internal milestone/PM planning (not public)
+docs/SCOPE.md
