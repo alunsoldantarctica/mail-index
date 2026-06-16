@@ -15,15 +15,47 @@
  * is the JSON-RPC transport and must carry nothing else.
  */
 
-import { loadConfig } from '../config/index.js';
+import { ConfigError, loadConfig, type OperatorConfig } from '../config/index.js';
 import { openDb } from '../index/db.js';
 import { Repo } from '../index/repo.js';
 import { buildSource } from '../cli/sync.js';
-import { serve, spawnDetachedSync } from './server.js';
+import { serve, serveSetup, spawnDetachedSync } from './server.js';
 import type { ToolContext } from './tools.js';
 
+/**
+ * Load the operator config, distinguishing "no config yet" (a first-run install
+ * → SETUP MODE) from a malformed config (a real error that should still fail).
+ * Returns null only when the config file is simply ABSENT (ConfigError whose
+ * message is the ENOENT "no operator config at …" guidance); any other
+ * ConfigError (bad JSON, bad shape) re-throws so the operator sees it.
+ */
+function loadConfigOrNull(): OperatorConfig | null {
+  try {
+    return loadConfig();
+  } catch (err) {
+    if (err instanceof ConfigError && /no operator config at /.test(err.message)) {
+      return null;
+    }
+    throw err;
+  }
+}
+
 async function main(): Promise<void> {
-  const config = loadConfig();
+  const config = loadConfigOrNull();
+
+  // SELF-BOOTSTRAP (ITEM 2): with no config the recall surface has no index to
+  // serve, so start in SETUP MODE — a reduced, advisory tool set that tells the
+  // agent/user exactly how to onboard — instead of exiting with an error.
+  if (config == null) {
+    process.stderr.write(
+      'mail-index-mcp: no operator config found — starting in SETUP MODE ' +
+        '(setup_status / setup_instructions). Run `mail-index setup --account <email>`, ' +
+        'then restart this server.\n',
+    );
+    await serveSetup();
+    return;
+  }
+
   const db = openDb();
   const repo = new Repo(db);
 

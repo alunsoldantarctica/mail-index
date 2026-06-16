@@ -44,6 +44,7 @@ import {
   McpToolError,
   type ToolContext,
 } from './tools.js';
+import { dispatchSetup, setupToolList } from './setup-tools.js';
 
 /** A JSON Schema object (the subset the SDK advertises for `inputSchema`). */
 type JsonSchema = {
@@ -373,6 +374,54 @@ export function buildServer(ctx: ToolContext): Server {
 /** Connect the server to a fresh stdio transport (the production wiring). */
 export async function serve(ctx: ToolContext): Promise<Server> {
   const server = buildServer(ctx);
+  await server.connect(new StdioServerTransport());
+  return server;
+}
+
+/**
+ * Build the SETUP-MODE server (the self-bootstrapping fallback). When no
+ * operator config exists, the recall surface cannot be served (no index), so
+ * instead of exiting we serve the reduced, ADVISORY {@link SETUP_TOOLS} surface
+ * (`setup_status` + `setup_instructions`) so the agent/user can self-onboard
+ * from inside the session. These tools are read-only (PATH + filesystem
+ * observation) and never spawn — the install/auth/config work stays in the CLI
+ * (`mail-index setup`), preserving the server's no-new-spawn egress invariant.
+ * Kept in a separate registry/module (setup-tools.ts) from the trusted recall
+ * core for exactly that reason.
+ */
+export function buildSetupServer(): Server {
+  const server = new Server(
+    { name: 'mail-index', version: '1.0.0' },
+    {
+      capabilities: { tools: {} },
+      instructions:
+        'mail-index — SETUP MODE: no operator config found yet, so only onboarding ' +
+        'tools are available. Call setup_status to see what is installed/configured ' +
+        'and setup_instructions for the exact steps. The server is advisory only — ' +
+        'run `mail-index setup --account <email>` in your shell, then restart this ' +
+        'server to load the full read-only recall surface.',
+    },
+  );
+
+  server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: setupToolList() }));
+
+  server.setRequestHandler(CallToolRequestSchema, (request) => {
+    const { name, arguments: args } = request.params;
+    try {
+      const result = dispatchSetup(name, (args ?? {}) as Record<string, unknown>);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { content: [{ type: 'text', text: message }], isError: true };
+    }
+  });
+
+  return server;
+}
+
+/** Connect a setup-mode server to a fresh stdio transport. */
+export async function serveSetup(): Promise<Server> {
+  const server = buildSetupServer();
   await server.connect(new StdioServerTransport());
   return server;
 }

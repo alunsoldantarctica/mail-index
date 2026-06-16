@@ -52,6 +52,12 @@ import {
   handback,
 } from '../dist/mcp/tools.js';
 import { TOOLS, toolList, dispatch } from '../dist/mcp/server.js';
+import {
+  setupToolList,
+  dispatchSetup,
+  setupStatus,
+  setupInstructions,
+} from '../dist/mcp/setup-tools.js';
 
 const ACCOUNT = 'acct';
 const ME = 'al@example.com';
@@ -498,4 +504,53 @@ test('dispatch through buildServer-shaped CallTool returns an isError result on 
   // get_message on an absent ref throws McpToolError; the server maps it to
   // isError. Here we assert the engine throws so the server contract holds.
   await assert.rejects(() => getMessage(ctxFor(repo), { ref: 'acct:nope', level: 'meta' }));
+});
+
+// --- ITEM 2: self-bootstrapping SETUP MODE -----------------------------------
+
+test('setup mode: tools/list advertises exactly the reduced setup surface', () => {
+  const names = setupToolList().map((t) => t.name);
+  assert.deepEqual(new Set(names), new Set(['setup_status', 'setup_instructions']));
+  // The full recall tools are NOT in the setup surface (different trust profile).
+  const full = new Set(TOOLS.map((t) => t.name));
+  for (const n of names) assert.ok(!full.has(n), `${n} is setup-only`);
+  for (const t of setupToolList()) {
+    assert.equal(t.inputSchema.type, 'object', `${t.name} advertises an object schema`);
+    assert.ok(t.description.length > 0, `${t.name} has a description`);
+  }
+});
+
+test('setup mode: with config present the FULL 18-tool surface is what serve() would use', () => {
+  // The config-present path serves the full surface — assert its size/identity
+  // here so the bootstrapping branch never silently shrinks the real surface.
+  assert.equal(TOOLS.length, 18, 'full surface is 18 tools');
+});
+
+test('setup_status reports observation and does not crash with no config', () => {
+  const res = setupStatus('/nonexistent/path/config.json');
+  assert.equal(res.mode, 'setup');
+  assert.equal(res.state.config_present, false);
+  assert.equal(res.ready, false);
+  assert.equal(typeof res.state.gog_installed, 'boolean');
+});
+
+test('setup_instructions surfaces the two human steps + the recommended command', () => {
+  const res = setupInstructions('al@example.com', '/nonexistent/path/config.json');
+  assert.equal(res.mode, 'setup');
+  assert.match(res.recommended_command, /mail-index setup --account al@example\.com/);
+  const auth = res.steps.find((s) => s.step === 'authenticate');
+  assert.equal(auth.human, true, 'browser OAuth is a human step');
+  assert.match(auth.command, /--gmail-scope=readonly/);
+  // The config_and_sync step is todo (config absent) and carries the setup cmd.
+  const cfg = res.steps.find((s) => s.step === 'config_and_sync');
+  assert.equal(cfg.status, 'todo');
+  assert.match(cfg.command, /mail-index setup/);
+});
+
+test('setup mode: dispatchSetup routes the two tools and rejects unknown', () => {
+  const status = dispatchSetup('setup_status', {});
+  assert.equal(status.mode, 'setup');
+  const instr = dispatchSetup('setup_instructions', { account: 'x@y.com' });
+  assert.match(instr.recommended_command, /x@y\.com/);
+  assert.throws(() => dispatchSetup('no_such_setup_tool', {}));
 });
