@@ -116,14 +116,25 @@ xychart-beta
 mail-index pays a slightly higher *fixed* schema tax (more, recall-focused
 tools) and earns it back many times over on the **first question**.
 
-Across a **[30 common-use-case suite](bench/RESULTS-USECASES.md)** (real mailbox),
-answering the questions an agent actually gets asked cost **19× fewer tokens**
-overall — 16× on "list all …" aggregations, ~10× on recall, and **227× on
-relational questions** ("who do I correspond with most", "what did I miss") that
-a query-based Gmail MCP has no way to answer except by scanning the whole mailbox.
+And across a **30 common-use-case suite** on a real 6-month mailbox — the
+questions an agent actually gets asked — answering them cost **19× fewer tokens**
+overall:
 
-Full write-up in **[docs/COMPARISON.md](docs/COMPARISON.md)**; reproduce/extend
-the numbers with **[bench/](bench/README.md)** (`node bench/run.mjs`).
+| Category | Example | mail-index | Gmail MCP | Savings |
+|---|---|--:|--:|--:|
+| Aggregation | "list all supplier emails / invoices" | 337K | 5.5M | **16.5×** |
+| Recall | "find the refund / recruiter message" | 5.7K | 55.9K | **9.8×** |
+| Read | "read this message in full" | 1.2K | 68K | **54.8×** |
+| Relational | "who do I email most" · "what did I miss" | 4.4K | 1.0M | **226.8×** |
+| **Overall (30)** | | **348K** | **6.67M** | **19.2×** |
+
+Relational questions are the tell: a query-based Gmail MCP has *no way* to answer
+"who do I correspond with most" or "what did I miss" except by scanning the whole
+mailbox — mail-index answers from precomputed structure in one call.
+
+Full write-up in **[docs/COMPARISON.md](docs/COMPARISON.md)** · table in
+**[bench/RESULTS-USECASES.md](bench/RESULTS-USECASES.md)** · reproduce with
+**[bench/](bench/README.md)** (`node bench/run.mjs`).
 
 ## Stack
 

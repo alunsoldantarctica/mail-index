@@ -60,6 +60,34 @@ per-task result tokens **2,136 (mail-index) vs 48,630 (Gmail API) — 22.8× les
 (recall tasks ~9–11×; reading one full message 80×+). Reproduce / extend the
 suite yourself; numbers scale with mailbox content.
 
+## 30 common use cases (measured on a real 6-month mailbox)
+
+[`bench/run.mjs`](../bench/README.md) scores the tokens an agent's context pays
+to **answer** 30 realistic questions, mail-index vs a stock Gmail-API MCP. Full
+table: [`bench/RESULTS-USECASES.md`](../bench/RESULTS-USECASES.md).
+
+| Category | Example | mail-index | Gmail MCP | Savings |
+|---|---|--:|--:|--:|
+| Aggregation (15) | "list all supplier emails / invoices / travel" | 337K | 5.5M | **16.5×** |
+| Recall (10) | "find the refund / the recruiter message" | 5.7K | 55.9K | **9.8×** |
+| Read (2) | "read this message in full" | 1.2K | 68K | **54.8×** |
+| Relational (3) | "who do I correspond with most" · "what did I miss" | 4.4K | 1.0M | **226.8×** |
+| **Overall (30)** | | **348K** | **6.67M** | **19.2×** |
+
+Two things this makes concrete:
+
+- **Aggregation scales against Gmail, not mail-index.** "List all X over 6 months"
+  forces Gmail to fetch every match (`list` returns ids only); mail-index returns
+  the ranked candidate set in one call. The gap grows with mailbox size.
+- **Relational questions have no Gmail primitive.** "Who do I correspond with
+  most" or "what did I miss this week" can't be expressed as a query — the agent
+  must pull and aggregate the whole mailbox (~1M tokens here). mail-index answers
+  from precomputed contact/engagement/thread structure in ~one compact call (227×).
+
+(Counts are a tokenizer-stable `chars/4` approximation; the ratios hold under
+exact Claude tokenization. Match counts cap at the Gmail API page size, so the
+Gmail aggregation/relational figures *under*-count the real cost.)
+
 ## Accuracy: a smarter query doesn't save Gmail
 
 Tokens aside — *can* a stock Gmail MCP even answer "list my purchases over 6
