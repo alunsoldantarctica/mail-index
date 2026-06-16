@@ -88,6 +88,41 @@ Two things this makes concrete:
 exact Claude tokenization. Match counts cap at the Gmail API page size, so the
 Gmail aggregation/relational figures *under*-count the real cost.)
 
+## 100 real inbox questions, by category
+
+We also derived the
+[top 100 questions people actually ask their inbox](research/top-100-inbox-questions.md)
+from a multi-source research pass, encoded them as a runnable suite, and measured
+the cost to answer each (`node bench/run.mjs --suite inbox100`). Answering all
+100 cost **15.3× fewer tokens** overall — and the gap tracks exactly with how much
+*synthesis* a question needs:
+
+```mermaid
+xychart-beta
+    title "Token savings by category — 100 inbox questions (higher is better)"
+    x-axis ["Retrieval", "Logistics", "Scheduling", "Commitments", "Finance", "Account", "Relationship", "Summarize"]
+    y-axis "Savings (×, mail-index vs Gmail MCP)" 0 --> 35
+    bar [3.0, 4.9, 9.2, 9.6, 13.0, 20.3, 24.7, 32.8]
+```
+
+| Category (count) | mail-index | Gmail MCP | Savings |
+|---|--:|--:|--:|
+| Summarization & catch-up (12) | 35K | 1.13M | **32.8×** |
+| Relationship & cross-thread (12) | 170K | 4.21M | **24.7×** |
+| Account, security & replies (10) | 73K | 1.48M | **20.3×** |
+| Finance, invoices & purchases (14) | 170K | 2.20M | **13.0×** |
+| Commitments & follow-ups (12) | 140K | 1.34M | **9.6×** |
+| Scheduling & appointments (8) | 27K | 250K | **9.2×** |
+| Logistics, travel & deliveries (14) | 79K | 383K | **4.9×** |
+| Retrieval & refinding (18) | 34K | 100K | **3.0×** |
+| **Overall (100)** | **727K** | **11.1M** | **15.3×** |
+
+The shape *is* the thesis: pure retrieval — the one thing Gmail search is built
+for — is the narrowest gap (3.0×), while the **synthesis** categories (summarize,
+relationship, commitments), where a query-based MCP has no primitive at all, are
+where mail-index pulls 20–33× ahead. Full table:
+[`bench/RESULTS-INBOX100.md`](../bench/RESULTS-INBOX100.md).
+
 ## Accuracy: a smarter query doesn't save Gmail
 
 Tokens aside — *can* a stock Gmail MCP even answer "list my purchases over 6

@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>mail-index — how the MCP works</title>
+<style>
+  :root {
+    --bg: #f0eee6;
+    --panel: #ffffff;
+    --ink: #1f1d1a;
+    --muted: #6b6760;
+    --line: #e6e3da;
+    --coral: #d97757;
+    --coral-ink: #b85c3e;
+    --green: #2f8f5b;
+    --tool-bg: #faf9f5;
+    --code: #2b2925;
+    --code-ink: #d7d2c6;
+    --radius: 14px;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans);
+    display: grid; place-items: center; padding: 32px 16px; line-height: 1.5;
+  }
+  .stage { width: min(760px, 100%); }
+  .caption { text-align: center; color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+  .caption b { color: var(--ink); }
+
+  /* window chrome */
+  .window {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: 0 24px 60px -28px rgba(40,34,28,.45), 0 2px 6px rgba(40,34,28,.06);
+    overflow: hidden;
+  }
+  .titlebar {
+    display: flex; align-items: center; gap: 8px; padding: 12px 16px;
+    border-bottom: 1px solid var(--line); background: #fbfaf6;
+  }
+  .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .dot.r { background: #ec6a5e; } .dot.y { background: #f3bf4f; } .dot.g { background: #61c554; }
+  .title { margin-left: 8px; font-size: 12.5px; color: var(--muted); font-weight: 600; }
+  .title .star { color: var(--coral); }
+
+  .convo { padding: 22px 22px 8px; min-height: 430px; }
+
+  .row { display: flex; gap: 12px; margin-bottom: 18px; opacity: 0; transform: translateY(8px);
+         transition: opacity .45s ease, transform .45s ease; }
+  .row.show { opacity: 1; transform: none; }
+  .avatar { flex: 0 0 30px; height: 30px; border-radius: 8px; display: grid; place-items: center;
+            font-weight: 700; font-size: 13px; color: #fff; }
+  .avatar.user { background: #4a4641; }
+  .avatar.ai { background: var(--coral); }
+  .bubble { flex: 1; }
+  .who { font-size: 12px; color: var(--muted); font-weight: 600; margin-bottom: 4px; }
+  .msg { font-size: 15px; }
+
+  .cursor::after { content: "▍"; color: var(--coral); animation: blink 1s steps(2) infinite; margin-left: 1px; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* tool call card */
+  .tool {
+    border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--tool-bg);
+    font-family: var(--mono); font-size: 12.5px; margin-top: 4px;
+  }
+  .tool-head {
+    display: flex; align-items: center; gap: 8px; padding: 9px 12px; cursor: default;
+    background: #f3f1ea; border-bottom: 1px solid var(--line); flex-wrap: wrap;
+  }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: var(--coral-ink); }
+  .chip svg { width: 14px; height: 14px; }
+  .arrow { color: var(--muted); }
+  .toolname { color: var(--ink); font-weight: 700; }
+  .badge {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px;
+    background: rgba(47,143,91,.12); color: var(--green); font-family: var(--sans);
+  }
+  .badge .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--green);
+                  box-shadow: 0 0 0 0 rgba(47,143,91,.5); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 70% { box-shadow: 0 0 0 7px rgba(47,143,91,0); } 100% { box-shadow: 0 0 0 0 rgba(47,143,91,0); } }
+
+  .tool-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .5s ease; }
+  .tool-body > div { overflow: hidden; }
+  .tool.open .tool-body { grid-template-rows: 1fr; }
+  pre { margin: 0; padding: 12px 14px; color: var(--code-ink); background: var(--code);
+        white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.6; }
+  .k { color: #c3a6ff; } .s { color: #9ece6a; } .n { color: #ff9e64; } .c { color: #6b6760; }
+  .req { border-bottom: 1px solid #3a352f; }
+  .lbl { font-family: var(--sans); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+         color: var(--muted); padding: 7px 14px 0; background: var(--code); }
+
+  .flow { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap;
+          font-family: var(--sans); font-size: 11.5px; color: var(--muted);
+          padding: 9px 12px; background: var(--code); border-top: 1px solid #3a352f; }
+  .node { display: inline-flex; align-items: center; gap: 6px; color: var(--code-ink); font-weight: 600; }
+  .node .ic { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center;
+              background: #3a352f; }
+  .flow .lk { color: #58524a; }
+  .nonet { color: var(--green); font-weight: 700; }
+
+  /* controls */
+  .bar { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 14px; }
+  button {
+    font-family: var(--sans); font-size: 13px; font-weight: 600; color: var(--ink);
+    background: var(--panel); border: 1px solid var(--line); padding: 8px 16px; border-radius: 999px;
+    cursor: pointer; transition: background .15s, border-color .15s;
+  }
+  button:hover { background: #faf9f5; border-color: #d8d4c8; }
+  button.primary { background: var(--coral); color: #fff; border-color: var(--coral); }
+  button.primary:hover { background: var(--coral-ink); }
+  .legend { text-align: center; font-size: 12px; color: var(--muted); margin-top: 10px; }
+  .legend code { font-family: var(--mono); background: #fff; border: 1px solid var(--line);
+                 padding: 1px 5px; border-radius: 5px; font-size: 11px; }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <p class="caption">How <b>mail-index</b> answers a vague question — entirely on your machine</p>
+
+    <div class="window">
+      <div class="titlebar">
+        <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+        <span class="title">Claude · <span class="star">✦</span> mail-index MCP connected</span>
+      </div>
+
+      <div class="convo" id="convo">
+        <!-- user -->
+        <div class="row" id="r-user">
+          <div class="avatar user">A</div>
+          <div class="bubble">
+            <div class="who">You</div>
+            <div class="msg" id="userMsg"></div>
+          </div>
+        </div>
+
+        <!-- assistant -->
+        <div class="row" id="r-ai">
+          <div class="avatar ai">✦</div>
+          <div class="bubble">
+            <div class="who">Claude</div>
+            <div class="msg" id="aiPre"></div>
+
+            <!-- tool call -->
+            <div class="tool" id="tool" style="display:none">
+              <div class="tool-head">
+                <span class="chip">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a4 4 0 0 1-5.4 5.4L4 17v3h3l5.3-5.3a4 4 0 0 1 5.4-5.4z"/></svg>
+                  mail-index
+                </span>
+                <span class="arrow">▸</span>
+                <span class="toolname" id="toolName">catch_up</span>
+                <span class="badge"><span class="pulse"></span><span id="badgeTxt">running locally</span></span>
+              </div>
+              <div class="tool-body" id="toolBody">
+                <div>
+                  <div class="lbl">request</div>
+                  <pre class="req" id="reqPre"></pre>
+                  <div class="flow">
+                    <span class="node"><span class="ic">✦</span>agent</span>
+                    <span class="lk">──▶</span>
+                    <span class="node"><span class="ic">▤</span>local SQLite + FTS5</span>
+                    <span class="lk">·</span>
+                    <span class="nonet">no network ✕</span>
+                  </div>
+                  <div class="lbl">response</div>
+                  <pre id="resPre"></pre>
+                </div>
+              </div>
+            </div>
+
+            <div class="msg" id="aiPost" style="margin-top:12px"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="bar">
+        <button class="primary" id="replay">▶ Replay</button>
+        <button id="speed">Speed: 1×</button>
+      </div>
+    </div>
+
+    <p class="legend">
+      Vague question → one local tool call → ranked, snippet-first result with
+      <code>index_as_of</code> → answer. The mailbox is never re-fetched.
+    </p>
+  </div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const userText = "What did I miss from the Antarctica suppliers this week?";
+  const aiPre  = "Let me check your recent mail locally.";
+  const aiPost = "You have 3 things waiting from this week:\n" +
+    "• Quark Expeditions — 2027 cabin allocation needs confirming by Fri.\n" +
+    "• Oceanwide — sent a revised group rate (≈8% lower).\n" +
+    "• Albatros — asking for the final pax manifest.\n\n" +
+    "Nothing else from suppliers needs you. Want me to draft the Quark reply?";
+
+  const req = [
+    ['p','{'],
+    ['p','  '],['k','"tool"'],['p',': '],['s','"catch_up"'],['p',','],
+    ['p','\n  '],['k','"account"'],['p',': '],['s','"work"'],['p',','],
+    ['p','\n  '],['k','"since"'],['p',': '],['s','"7d"'],['p',','],
+    ['p','\n  '],['k','"only"'],['p',': '],['s','"correspondents"'],
+    ['p','\n}'],
+  ];
+  const res = [
+    ['p','{ '],['k','"index_as_of"'],['p',': '],['s','"2026-06-16T08:12Z"'],['p',', '],['k','"hits"'],['p',': [\n'],
+    ['p','  { '],['k','"ref"'],['p',':'],['s','"work:18f2a…"'],['p',', '],['k','"from"'],['p',':'],['s','"Quark Expeditions"'],['p',',\n'],
+    ['p','    '],['k','"subject"'],['p',':'],['s','"2027 cabin allocation"'],['p',', '],['k','"snippet"'],['p',':'],['s','"confirm by Fri…"'],['p',', '],['k','"body_state"'],['p',':'],['s','"summary"'],['p',' },\n'],
+    ['p','  { '],['k','"ref"'],['p',':'],['s','"work:18f0c…"'],['p',', '],['k','"from"'],['p',':'],['s','"Oceanwide"'],['p',',\n'],
+    ['p','    '],['k','"subject"'],['p',':'],['s','"revised group rate"'],['p',', '],['k','"snippet"'],['p',':'],['s','"≈8% lower…"'],['p',' },\n'],
+    ['p','  { '],['k','"ref"'],['p',':'],['s','"work:18ef7…"'],['p',', '],['k','"from"'],['p',':'],['s','"Albatros"'],['p',', '],['k','"snippet"'],['p',':'],['s','"final manifest?"'],['p',' }\n'],
+    ['p',' ], '],['k','"count"'],['p',': '],['n','3'],['p',', '],['k','"network_calls"'],['p',': '],['n','0'],['p',' }'],
+  ];
+
+  let speed = 1, timers = [], running = false;
+  const wait = ms => new Promise(r => timers.push(setTimeout(r, ms / speed)));
+
+  function clearAll() {
+    timers.forEach(clearTimeout); timers = [];
+    ['r-user','r-ai'].forEach(i => $(i).classList.remove('show'));
+    $('userMsg').textContent = ''; $('aiPre').textContent = '';
+    $('aiPost').textContent = ''; $('aiPost').classList.remove('cursor');
+    $('userMsg').classList.remove('cursor');
+    $('reqPre').innerHTML = ''; $('resPre').innerHTML = '';
+    $('tool').style.display = 'none'; $('tool').classList.remove('open');
+    $('badgeTxt').textContent = 'running locally';
+  }
+
+  async function type(el, text, perChar = 26) {
+    el.classList.add('cursor');
+    for (let i = 0; i < text.length; i++) {
+      el.textContent += text[i];
+      await wait(perChar);
+    }
+    el.classList.remove('cursor');
+  }
+
+  async function paintTokens(el, tokens, per = 9) {
+    el.classList.add('cursor');
+    for (const [cls, txt] of tokens) {
+      const span = document.createElement('span');
+      if (cls !== 'p') span.className = cls;
+      span.textContent = txt;
+      el.appendChild(span);
+      await wait(per);
+    }
+    el.classList.remove('cursor');
+  }
+
+  async function run() {
+    if (running) return; running = true;
+    clearAll();
+    await wait(300);
+
+    $('r-user').classList.add('show');
+    await type($('userMsg'), userText, 24);
+    await wait(450);
+
+    $('r-ai').classList.add('show');
+    await type($('aiPre'), aiPre, 18);
+    await wait(300);
+
+    // reveal tool card + expand
+    $('tool').style.display = 'block';
+    await wait(250);
+    $('tool').classList.add('open');
+    await wait(350);
+
+    await paintTokens($('reqPre'), req, 10);
+    await wait(500);              // "executing locally"
+    $('badgeTxt').textContent = 'done · 0 network calls';
+    await paintTokens($('resPre'), res, 7);
+    await wait(550);
+
+    await type($('aiPost'), aiPost, 12);
+    running = false;
+    if (location.hash === '#loop') { await wait(2600); run(); }
+  }
+
+  $('replay').onclick = run;
+  $('speed').onclick = () => {
+    speed = speed === 1 ? 2 : speed === 2 ? 0.5 : 1;
+    $('speed').textContent = 'Speed: ' + (speed === 0.5 ? '0.5×' : speed + '×');
+  };
+
+  run();
+})();
+</script>
+</body>
+</html>

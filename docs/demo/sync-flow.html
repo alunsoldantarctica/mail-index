@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>mail-index — how syncing works</title>
+<style>
+  :root {
+    --bg: #f0eee6; --panel:#fff; --ink:#1f1d1a; --muted:#6b6760; --line:#e6e3da;
+    --coral:#d97757; --coral-ink:#b85c3e; --green:#2f8f5b; --gold:#d8a64a; --blue:#5b7bd4;
+    --soft:#faf9f5; --mono: ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+       display:grid;place-items:center;padding:28px 16px}
+  .stage{width:min(720px,100%)}
+  .cap{text-align:center;color:var(--muted);font-size:13px;margin:0 0 16px}
+  .cap b{color:var(--ink)}
+  .scene{position:relative;display:flex;flex-direction:column;gap:30px}
+
+  .node{position:relative;background:var(--panel);border:1px solid var(--line);
+        border-radius:14px;box-shadow:0 12px 30px -20px rgba(40,34,28,.4);z-index:2}
+  .node .hd{display:flex;align-items:center;gap:8px;padding:9px 14px;border-bottom:1px solid var(--line);
+            font-size:12.5px;font-weight:700;background:var(--soft);border-radius:14px 14px 0 0}
+  .ic{width:20px;height:20px;border-radius:6px;display:grid;place-items:center;color:#fff;font-size:12px}
+  .ic.gmail{background:#ea4335}.ic.db{background:#3b6fb0}.ic.mcp{background:var(--coral)}
+  .sub{margin-left:auto;font-weight:600;color:var(--muted);font-size:11px;font-family:var(--mono)}
+  .body{padding:12px 14px;display:grid;gap:7px}
+
+  .mailrow{display:flex;align-items:center;gap:9px;font-size:12px;padding:5px 9px;border-radius:8px;
+           background:#fbfaf6;border:1px solid var(--line);color:var(--muted)}
+  .mailrow .star{width:14px;text-align:center;color:#cfcabd}
+  .mailrow .frm{font-weight:600;color:#8a857c;min-width:120px}
+  .mailrow .snip{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;flex:1}
+  .mailrow.imp{background:#fff;border-color:#ecd9b6;color:var(--ink)}
+  .mailrow.imp .star{color:var(--gold)}
+  .mailrow.imp .frm{color:var(--ink)}
+  .tag{font-family:var(--mono);font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px}
+  .tag.full{background:rgba(216,166,74,.16);color:#a9791f}
+  .tag.meta{background:#f0eee6;color:#8a857c}
+
+  /* DB rows fill in */
+  .dbrow{display:flex;align-items:center;gap:9px;font-size:12px;padding:5px 9px;border-radius:8px;
+         border:1px dashed var(--line);color:#b8b3a8;opacity:.5;transition:all .4s}
+  .dbrow.on{opacity:1;border-style:solid;border-color:#cfe3d6;background:#f4faf6;color:var(--ink)}
+  .dbrow.on.full{border-color:#ecd9b6;background:#fffaf0}
+  .dbrow .frm{font-weight:600;min-width:120px}
+  .dbrow .dt{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--green)}
+
+  .answer{font-size:13px;color:var(--ink)}
+  .answer .q{color:var(--muted);font-style:italic}
+  .answer .a{margin-top:6px;font-weight:600}
+  .answer .a .badge{font-family:var(--mono);font-size:10.5px;font-weight:700;color:var(--green);
+                    background:rgba(47,143,91,.12);padding:2px 7px;border-radius:999px;margin-left:6px}
+
+  /* pipes + dots overlay */
+  .wires{position:absolute;inset:0;z-index:1;pointer-events:none}
+  .lbl{position:absolute;font-size:11px;font-weight:600;color:var(--muted);background:var(--bg);
+       padding:1px 8px;border-radius:6px;transform:translate(-50%,-50%);white-space:nowrap}
+  .lbl .em{color:var(--coral-ink)}
+  .dot{position:absolute;width:9px;height:9px;border-radius:50%;transform:translate(-50%,-50%);
+       opacity:0;filter:drop-shadow(0 0 4px rgba(0,0,0,.15))}
+  .dot.gold{background:var(--gold)} .dot.blue{background:var(--blue)} .dot.coral{background:var(--coral)}
+  .dot.green{background:var(--green)}
+</style>
+</head>
+<body>
+  <div class="stage">
+    <p class="cap"><b>mail-index</b> prewarms a local index, then the MCP serves your agent from it —
+       touching Gmail again only on a miss</p>
+
+    <div class="scene" id="scene">
+      <svg class="wires" id="wires" preserveAspectRatio="none"></svg>
+
+      <!-- GMAIL -->
+      <div class="node" id="nGmail">
+        <div class="hd"><span class="ic gmail">M</span> Gmail<span class="sub">your mailbox</span></div>
+        <div class="body">
+          <div class="mailrow imp"><span class="star">★</span><span class="frm">Quark Exped.</span><span class="snip">2027 cabin allocation — confirm by Fri</span><span class="tag full">full</span></div>
+          <div class="mailrow"><span class="star">·</span><span class="frm">LinkedIn</span><span class="snip">5 new jobs for you</span><span class="tag meta">meta</span></div>
+          <div class="mailrow imp"><span class="star">★</span><span class="frm">Oceanwide</span><span class="snip">revised group rate, ≈8% lower</span><span class="tag full">full</span></div>
+          <div class="mailrow"><span class="star">·</span><span class="frm">Newsletter</span><span class="snip">This week in polar travel</span><span class="tag meta">meta</span></div>
+          <div class="mailrow imp"><span class="star">★</span><span class="frm">Albatros</span><span class="snip">final pax manifest?</span><span class="tag full">full</span></div>
+        </div>
+      </div>
+
+      <!-- LOCAL DB -->
+      <div class="node" id="nDb">
+        <div class="hd"><span class="ic db">▤</span> Local index<span class="sub">SQLite + FTS5 · on your machine</span></div>
+        <div class="body">
+          <div class="dbrow full" data-i="0"><span class="frm">Quark Exped.</span><span class="snip">cabin allocation</span><span class="dt">body ✓</span></div>
+          <div class="dbrow" data-i="1"><span class="frm">LinkedIn</span><span class="snip">5 new jobs</span><span class="dt">meta</span></div>
+          <div class="dbrow full" data-i="2"><span class="frm">Oceanwide</span><span class="snip">revised rate</span><span class="dt">body ✓</span></div>
+          <div class="dbrow" data-i="3"><span class="frm">Newsletter</span><span class="snip">polar travel</span><span class="dt">meta</span></div>
+          <div class="dbrow full" data-i="4"><span class="frm">Albatros</span><span class="snip">pax manifest</span><span class="dt">body ✓</span></div>
+        </div>
+      </div>
+
+      <!-- MCP / AGENT -->
+      <div class="node" id="nMcp">
+        <div class="hd"><span class="ic mcp">✦</span> Claude · mail-index MCP<span class="sub">reads the local DB</span></div>
+        <div class="body">
+          <div class="answer">
+            <span class="q" id="q">"What did I miss from suppliers this week?"</span>
+            <div class="a" id="a"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+  const wires = $('#wires'), scene = $('#scene');
+  const dbrows = [...document.querySelectorAll('.dbrow')];
+
+  // ---- geometry: draw pipes between node edges, place labels ----
+  let G = {};
+  function geom() {
+    const sb = scene.getBoundingClientRect();
+    const R = el => { const r = el.getBoundingClientRect();
+      return { l:r.left-sb.left, t:r.top-sb.top, r:r.right-sb.left, b:r.bottom-sb.top,
+               cx:(r.left+r.right)/2-sb.left, cy:(r.top+r.bottom)/2-sb.top, w:r.width, h:r.height }; };
+    G = { w:sb.width, h:sb.height, gmail:R($('#nGmail')), db:R($('#nDb')), mcp:R($('#nMcp')) };
+    wires.setAttribute('viewBox', `0 0 ${G.w} ${G.h}`);
+    const midX = G.w/2, sideX = G.gmail.r - 48;
+    wires.innerHTML = `
+      <line x1="${midX}" y1="${G.gmail.b}" x2="${midX}" y2="${G.db.t}" stroke="#d8d4c8" stroke-width="2"/>
+      <line x1="${midX}" y1="${G.db.b}" x2="${midX}" y2="${G.mcp.t}" stroke="#d8d4c8" stroke-width="2"/>
+      <line x1="${sideX}" y1="${G.db.t}" x2="${sideX}" y2="${G.gmail.b}"
+            stroke="#e0c9a0" stroke-width="2" stroke-dasharray="5 5"/>`;
+    place('#lblSync', midX, (G.gmail.b+G.db.t)/2);
+    place('#lblMcp',  midX, (G.db.b+G.mcp.t)/2);
+    place('#lblMiss', sideX, (G.gmail.b+G.db.t)/2);
+    return { midX, sideX };
+  }
+  function lbl(id, html){ let e=$(id); if(!e){e=document.createElement('div');e.className='lbl';e.id=id.slice(1);scene.appendChild(e);} e.innerHTML=html; }
+  function place(id,x,y){ const e=$(id); if(e){e.style.left=x+'px'; e.style.top=y+'px';} }
+  lbl('#lblSync','sync — <span class="em">important messages prewarm</span> the index');
+  lbl('#lblMcp','agent queries the <span class="em">local DB</span>');
+  lbl('#lblMiss','on-miss<br><span class="em">1 fetch</span>');
+
+  // ---- animated dots ----
+  function fly(cls, x1,y1, x2,y2, dur, delay=0) {
+    const d = document.createElement('div'); d.className = 'dot ' + cls; scene.appendChild(d);
+    d.animate(
+      [ {left:x1+'px', top:y1+'px', opacity:0, offset:0},
+        {opacity:1, offset:.12},{opacity:1, offset:.88},
+        {left:x2+'px', top:y2+'px', opacity:0, offset:1} ],
+      { duration:dur, delay, easing:'cubic-bezier(.4,0,.2,1)', fill:'forwards' }
+    ).onfinish = () => d.remove();
+  }
+
+  // ---- master loop ----
+  function reset(){ dbrows.forEach(r=>r.classList.remove('on')); $('#a').innerHTML=''; }
+
+  function loop() {
+    const { midX, sideX } = geom();
+    const g=G.gmail, db=G.db, mcp=G.mcp;
+    reset();
+    let t = 0;
+    const at = (ms, fn) => setTimeout(fn, ms);
+
+    // 1) sync: only the 3 important rows flow down; db rows light as they arrive
+    const order = [0,2,4]; // important indices
+    order.forEach((i, k) => {
+      const delay = 400 + k*520;
+      fly('gold', midX, g.b, midX, db.t, 900, delay);
+      at(delay+900, () => dbrows[i].classList.add('on'));
+    });
+    // meta rows fill quietly too (metadata for everything)
+    [1,3].forEach((i,k)=> at(2300 + k*300, ()=> dbrows[i].classList.add('on')));
+
+    // 2) agent asks -> query goes up to DB, answer comes down
+    const qStart = 3200;
+    at(qStart, () => fly('coral', midX, mcp.t, midX, db.b, 700));
+    at(qStart+850, () => fly('green', midX, db.b, midX, mcp.t, 700));
+    at(qStart+1500, () => {
+      $('#a').innerHTML = '3 supplier items waiting — Quark, Oceanwide, Albatros.' +
+        '<span class="badge">answered from local DB · 0 network</span>';
+    });
+
+    // 3) on-miss: a needed body isn't indexed -> one fetch up to Gmail, body returns
+    const mStart = 5400;
+    at(mStart, () => $('#a').innerHTML += '<br><span style="color:#8a857c">Reading Albatros in full…</span>');
+    at(mStart+150,  () => fly('coral', midX, mcp.t, midX, db.b, 600));        // agent->db
+    at(mStart+750,  () => fly('blue',  sideX, db.t, sideX, g.b, 750));         // db->gmail (miss)
+    at(mStart+1550, () => fly('gold',  sideX, g.b, sideX, db.t, 750));         // gmail->db (the one body)
+    at(mStart+2350, () => fly('green', midX, db.b, midX, mcp.t, 600));         // db->agent
+    at(mStart+3000, () => $('#a').innerHTML =
+        'Albatros needs the <b>final pax manifest</b> by Mon — everything else can wait.' +
+        '<span class="badge">1 fetch · only the missing body</span>');
+
+    at(9200, loop); // restart
+  }
+
+  window.addEventListener('resize', () => geom());
+  // start once layout is ready
+  requestAnimationFrame(() => requestAnimationFrame(loop));
+})();
+</script>
+</body>
+</html>

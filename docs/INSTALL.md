@@ -20,9 +20,18 @@ in this repo.
 
 - **Node.js 24+** (the index uses the built-in `node:sqlite` — no native build
   step, no `better-sqlite3`).
-- A **MailSource adapter** for your provider. v1 ships the **gws adapter**
-  (Gmail via the [`gws`](https://github.com/) Google Workspace CLI). Other
-  adapters (DirectGmail, IMAP) are v1.x.
+- A **MailSource adapter** for your Gmail mailbox. mail-index ships two,
+  both read-only:
+  - **`gog`** (recommended) — Gmail via the
+    [`gog`](https://github.com/openclaw/gogcli) CLI (`brew install
+    openclaw/tap/gogcli`). Clean JSON output, a `--gmail-no-send` safety flag,
+    and the path the one-click installers use.
+  - **`gws`** — Gmail via Google's [`gws`](https://github.com/googleworkspace/cli)
+    Workspace CLI. Useful if you already run `gws`, or for a Workspace org that
+    manages its own OAuth client.
+
+Either adapter ultimately talks to the Gmail API through a Google **OAuth
+client**. You have two ways to provide one — see [§2](#2-connect-a-mailbox-pick-an-oauth-path).
 
 ---
 
@@ -45,30 +54,88 @@ This installs two bins:
 
 ---
 
-## 2. Install + authenticate a MailSource (the gws adapter)
+## 2. Connect a mailbox: pick an OAuth path
 
-The gws adapter shells out to the `gws` CLI, one isolated config directory per
-mailbox. This is the setup friction later adapters remove — it is not
-permanent.
+Reading Gmail needs a Google **OAuth client**. mail-index gives you **two ways**
+to get one — pick whichever fits. Both end with the same thing: an adapter
+authenticated against your mailbox with **read-only** Gmail scope
+(`gmail.readonly`). mail-index never mutates the mailbox.
 
-1. **Install `gws`** and put it on your `PATH` (the adapter resolves the `gws`
-   binary via `PATH`).
-2. **Create a provider OAuth app** (a Google Cloud project + OAuth consent
-   screen + a desktop OAuth client). Read-only Gmail scope is sufficient —
-   mail-index never mutates the mailbox.
-3. **Authenticate each mailbox** into its own config directory. Use a distinct
-   directory per account so credentials never cross:
+| | **Option A — mail-index beta client** | **Option B — your own Google Cloud client** |
+|---|---|---|
+| Google Cloud setup | **None** | ~15 min in the GCP console (we walk you through it) |
+| Who signs the app | mail-index | you |
+| User limit | **~100 users** (beta, "unverified app" screen) | none (it's your own app) |
+| Best for | trying it fast, individuals | teams, Workspace orgs, going past the beta cap |
 
+> **Why the ~100 cap on Option A?** `gmail.readonly` is a Google *restricted*
+> scope. Until the mail-index app finishes Google verification + a CASA security
+> audit it stays in "testing" mode, which Google caps at ~100 users. Option B
+> uses *your* client, so the cap is yours to lift (or ignore). Full detail:
+> [docs/oauth-and-verification.md](oauth-and-verification.md).
+
+### Option A — use the mail-index beta OAuth client (skip Google Cloud)
+
+The fastest path. The `mail-index setup` wizard installs the adapter, places the
+**mail-index** OAuth client for you, and runs the browser sign-in — you never
+touch the Google Cloud console.
+
+```sh
+mail-index setup            # installs gog if needed, places our client, signs you in
+```
+
+Under the hood this does, per mailbox:
+
+```sh
+# 1. install the gog adapter (macOS)
+brew install openclaw/tap/gogcli
+# 2. place the bundled mail-index OAuth client (piped in, not written to disk)
+gog auth credentials -      # mail-index feeds it the client; you are not prompted for one
+# 3. browser sign-in, read-only Gmail only
+gog auth add you@gmail.com --services gmail --gmail-scope=readonly
+```
+
+You'll see an "unverified app — mail-index" consent screen (expected during the
+beta); approve it to grant **read-only** Gmail access.
+
+### Option B — bring your own Google Cloud OAuth client (no caps)
+
+Create a Desktop OAuth client once, then point the adapter at it. This is your
+own app, so there is no mail-index user cap and no dependency on our beta status.
+
+> **Setting this up with an AI agent?** Follow the step-by-step,
+> verify-after-each-step runbook in **[docs/agent-install.md](agent-install.md)** —
+> written for an agent to execute, with the two human-only steps (the Cloud
+> Console + the browser sign-in) clearly marked.
+
+1. **Create a Google Cloud project** →
+   <https://console.cloud.google.com/projectcreate>.
+2. **Enable the Gmail API** in that project.
+3. **Configure the OAuth consent screen** (External). Add **only** the
+   `https://www.googleapis.com/auth/gmail.readonly` scope. While in "testing",
+   add yourself as a test user.
+4. **Create credentials → OAuth client ID → Desktop app.** Download the
+   `client_secret.json`. (Desktop clients auto-allow the loopback redirect the
+   CLIs use.)
+5. **Hand the client to your adapter** and authenticate each mailbox:
+
+   **gog:**
    ```sh
-   # one config dir per mailbox
+   gog auth credentials ~/Downloads/client_secret_xxx.json   # store your client
+   gog auth add you@gmail.com --services gmail --gmail-scope=readonly
+   gog auth list -j                                          # verify
+   ```
+
+   **gws** (one isolated config dir per mailbox so credentials never cross):
+   ```sh
+   # place your client at the gws default location, then log in per account
    GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws-acct-a gws auth login
    GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws-acct-a gws auth status   # verify
-
    GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws-acct-b gws auth login
    ```
 
-OAuth tokens and credentials are the adapter's concern — they live in the gws
-config dir, **never** in this repo or the index DB.
+Either way, OAuth tokens live in the **adapter's** own store (gog's config, or
+the gws config dir) — **never** in this repo or the index DB.
 
 ---
 
@@ -86,19 +153,20 @@ mail-index init
   `${XDG_CONFIG_HOME:-~/.config}/mail-index/config.json` **only if one does not
   already exist** (your real accounts are never overwritten).
 
-Then edit that config to map your account **labels** to gws config dirs:
+Then edit that config to map your account **labels** to adapters. A `gog`
+account is keyed by its email; a `gws` account by its config dir:
 
 ```jsonc
 {
   "accounts": {
-    "acct-a": {
-      "adapter": "gws",
-      "configDir": "~/.config/gws-acct-a",
+    "personal": {
+      "adapter": "gog",
+      "account": "you@gmail.com",
       "syncPolicy": { "since": "1mo", "includeSent": true }
     },
-    "acct-b": {
+    "work": {
       "adapter": "gws",
-      "configDir": "~/.config/gws-acct-b",
+      "configDir": "~/.config/gws-work",
       "syncPolicy": { "query": "from:you@example.com", "limit": 5000, "includeSent": false }
     }
   }
@@ -107,12 +175,20 @@ Then edit that config to map your account **labels** to gws config dirs:
 
 | Field | Meaning |
 |-------|---------|
-| `adapter` | which MailSource backs the account (`gws` in v1) |
-| `configDir` | the per-account `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` (`~` is expanded) |
+| `adapter` | which MailSource backs the account: `gog` or `gws` |
+| `account` | **gog only** — the mailbox email gog signs in as (`gog auth add` authorized it) |
+| `configDir` | **gws only** — the per-account `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` (`~` is expanded) |
 | `syncPolicy.since` | default lower bound on message age (`30d`, `1mo`, ISO-8601) |
 | `syncPolicy.query` | default provider-native filter (e.g. `from:you@example.com`) |
 | `syncPolicy.limit` | default cap on enumerated ids |
 | `syncPolicy.includeSent` | index Sent metadata too (unlocks replied/initiated signals) |
+
+> **Switching adapters is free.** An account label is keyed to its mailbox, not
+> its transport — message ids are identical whether `gog` or `gws` fetched them.
+> Change a label's adapter (e.g. `gws` → `gog`) for the **same mailbox** and the
+> cached index is reused; the next sync only pulls new mail. mail-index pins each
+> label to the address it first indexed and refuses a sync that would point it at
+> a *different* mailbox, so a swap can never corrupt the cache.
 
 The config file holds your private accounts — keep it out of version control.
 
@@ -311,7 +387,15 @@ sync. A sensible growth path:
 
 **Rule of thumb for sizing:** index size ≈ messages × ~1.6 KB (metadata), plus
 ~1–3 KB for each body you enrich. 10k messages ≈ ~16 MB; enriching 1k of them
-≈ +~2 MB. It scales with message *count*, not mailbox bytes.
+≈ +~2 MB. It scales with message *count*, not mailbox bytes — a 5 MB email with
+attachments is still ~2 KB in the index. (Measured on a real 6-month, ~8,000-message
+mailbox.)
+
+| Your mailbox | Index size (metadata) | First sync (one-time) |
+|---|--:|--:|
+| 1,000 messages | ~1.6 MB | ~15–20 min |
+| 10,000 messages | ~16 MB | run as a background job |
+| ~1 GB of Gmail (~9–10k msgs) | ~16 MB (**~1.5%** of mailbox) | run as a background job |
 
 ---
 

@@ -3,7 +3,7 @@
 mail-index indexes a mailbox into a local database and exposes it to an AI agent
 over a local MCP server. It touches sensitive data (your email), so this document
 states plainly what it protects, what it does **not**, where the trust boundaries
-are, and how you can verify the claims yourself ([SECURITY.md](../SECURITY.md#verify-our-claims-yourself)).
+are, and how you can verify the claims yourself ([SECURITY.md](../.github/SECURITY.md#verify-our-claims-yourself)).
 
 ## Assets
 
@@ -87,5 +87,5 @@ Actions release. See [PUBLISHING.md](PUBLISHING.md). Verify with
 
 ## Reporting
 
-Security issues: see [SECURITY.md](../SECURITY.md) — please report privately
+Security issues: see [SECURITY.md](../.github/SECURITY.md) — please report privately
 rather than opening a public issue.

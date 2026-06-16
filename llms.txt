@@ -31,4 +31,4 @@ user's data; accounts and the curated profile are private operator config.
 - [Benchmark results](https://github.com/alunsoldantarctica/mail-index/blob/main/bench/RESULTS.md): recall × token matrix — a distilled Gmail query vs one mail-index phrase
 
 ## Optional
-- [Security & privacy](https://github.com/alunsoldantarctica/mail-index/blob/main/SECURITY.md): local-first posture, treating the index as sensitive, vulnerability reporting
+- [Security & privacy](https://github.com/alunsoldantarctica/mail-index/blob/main/.github/SECURITY.md): local-first posture, treating the index as sensitive, vulnerability reporting
