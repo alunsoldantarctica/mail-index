@@ -111,8 +111,43 @@ git tag v1.0.0 && git push origin v1.0.0     # → triggers the release workflow
 A local `npm publish` (Step 1 above) still works but produces **no** provenance —
 prefer the tagged CI release for anything public.
 
+## The `.mcpb` bundle (GitHub Release asset)
+
+mail-index also ships as a one-file **MCP bundle** (`mail-index.mcpb`, produced by
+`pnpm bundle` → `mcpb pack`). The tagged release workflow
+([`release.yml`](../.github/workflows/release.yml)) now packs it and attaches it to
+the tag's **GitHub Release** (via `softprops/action-gh-release`), so every
+published version has a downloadable, double-click-installable bundle alongside the
+npm tarball. This needs `contents: write` on the job (already set).
+
+Build it locally to inspect before tagging:
+
+```sh
+pnpm bundle            # → ./mail-index.mcpb
+```
+
+### What is NOT done (deliberately out of scope)
+
+The release flow stops at an **unsigned** `.mcpb`. The following are *not* wired up
+because they require maintainer-held credentials / hardware and run out of band:
+
+- **Apple Developer-ID signing + notarization** of the bundle (needs an Apple
+  Developer account, a Developer-ID certificate, and `notarytool` credentials).
+  Without it, macOS Gatekeeper will warn on the bundle.
+- **Windows Authenticode signing** (needs a code-signing certificate).
+- The **actual `npm publish`** and the **`.mcpb` Release** only happen when a
+  maintainer pushes a real `vX.Y.Z` tag with `NPM_TOKEN` configured — CI never
+  publishes on its own; pushing the tag is the human trigger.
+
+If/when certificates are available, add signing steps after `pnpm run bundle` and
+before the upload (sign → `notarytool submit --wait` → `stapler staple` on macOS;
+`signtool` on Windows).
+
 ## Releasing new versions
 
-Bump `version` in **both** `package.json` and `server.json`, push a `vX.Y.Z` tag
-(CI publishes to npm with provenance), then `mcp-publisher publish server.json`
-to update the registry entry.
+Bump `version` in **both** `package.json` and `server.json`, push a `vX.Y.Z` tag.
+CI then, in one run: builds + tests, publishes to npm with provenance, packs
+`mail-index.mcpb`, and uploads it to the GitHub Release. Finally run
+`mcp-publisher publish server.json` to update the registry entry. The version tag,
+npm auth (`NPM_TOKEN`), and any code-signing certs remain the maintainer's
+responsibility.

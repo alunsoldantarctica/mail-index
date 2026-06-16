@@ -1,8 +1,15 @@
 name: Release
 
-# Publish to npm with provenance when a vX.Y.Z tag is pushed. Provenance is a
-# signed attestation (via GitHub OIDC) linking the published artifact to this
-# repo + this workflow run — consumers verify with `npm audit signatures`.
+# Fires on a vX.Y.Z tag and does two things:
+#   1. Publish to npm with provenance — a signed attestation (via GitHub OIDC)
+#      linking the published artifact to this repo + this workflow run; consumers
+#      verify with `npm audit signatures`.
+#   2. Pack the MCP bundle (.mcpb via `pnpm bundle`) and attach it to the GitHub
+#      Release so the one-file install path has an artifact per version.
+#
+# NOT done here (see docs/PUBLISHING.md): Apple Developer-ID signing +
+# notarization and Windows Authenticode signing of the .mcpb — those need
+# maintainer-held certificates and run out of band.
 on:
   push:
     tags: ['v*']
@@ -14,6 +21,9 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub Release + upload the .mcpb asset
+      id-token: write # npm provenance
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -25,7 +35,21 @@ jobs:
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm run build
       - run: pnpm test
+
+      # Pack the MCP bundle (mcpb pack → mail-index.mcpb). `pnpm bundle` runs the
+      # build again + the mcpb packer; the artifact lands at repo root.
+      - name: Pack the MCP bundle
+        run: pnpm run bundle
+
       # Use npm (not pnpm) to publish so --provenance is honored.
       - run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Attach the unsigned .mcpb to the tag's GitHub Release (created if absent).
+      # Signing/notarization is deliberately out of scope here (docs/PUBLISHING.md).
+      - name: Upload the .mcpb to the GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          files: mail-index.mcpb
+          fail_on_unmatched_files: true
