@@ -100,7 +100,7 @@ and used only as a real-world test of the generic tool.
 - No server, no cloud, no account — strictly local.
 - No embeddings/topic clustering (deferred).
 - No cross-person identity resolution in v1 (deferred).
-- Not provider-locked, but only one adapter (Gmail via `gws`) ships in v1.
+- Not provider-locked; two Gmail adapters ship — `gog` (recommended) and `gws`.
 
 ---
 
@@ -127,7 +127,7 @@ replaceable:
 │   • Classification (category, is_list, direction)              │
 ├──────────────────────────────────────────────────────────────┤
 │  MailSource adapter interface                                  │
-│   • GwsAdapter (v1)   • DirectGmailAdapter / ImapAdapter (v1.x)│
+│   • GogAdapter (v1)  • GwsAdapter (v1)  • ImapAdapter (v1.x) │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -144,7 +144,7 @@ Resolved during design review. Each is a one-line decision + the reasoning.
 
 | # | Decision | Why |
 |---|---|---|
-| D1 | **`MailSource` adapter interface; gws is Adapter #1.** | Keeps the gws setup tax (GCP project, consent screen, IAM) a *swappable* concern, not permanent. `listIds/getMetadata/getFull` already exist implicitly in the prototype. |
+| D1 | **`MailSource` adapter interface; two Gmail adapters ship (`gog` recommended, `gws`).** | Keeps the OAuth setup tax (GCP project, consent screen) a *swappable* concern; both adapters share the Gmail-REST mapping. `listIds/getMetadata/getFull` already exist implicitly in the prototype. |
 | D2 | **TypeScript + `node:sqlite` (built-in) + npm/npx.** | Kills both the `/usr/bin/sqlite3` path dependency and the `better-sqlite3` native-compile friction. `npx mail-index` works on any Node 24+ machine. |
 | D3 | **Two bins** — `mail-index` (CLI) and `mail-index-mcp` (server) on `@modelcontextprotocol/sdk`. | Clean separation of ops vs agent surface. |
 | D4 | **Single-binary distribution (Bun `--compile` / Node SEA) is a v1.x goal, not v1.** | Solves "no runtime to manage" without leaving TS. Real desire behind "use Rust" was distribution, not speed. |
@@ -428,10 +428,9 @@ just "omit the `account` filter"; per-account is "pass `--account`".
 ## 16. Onboarding — generic vs operator-specific
 
 **Generic (in the repo, placeholders only):**
-1. `npm i -g mail-index` (or `npx mail-index`).
-2. Install + authenticate a `MailSource`. v1: the gws adapter — install gws,
-   create a provider OAuth app, authenticate each account. (This friction is
-   exactly what later adapters remove.)
+1. Install from source now (`pnpm build`); `npm i -g mail-index` once published.
+2. Install + authenticate a `MailSource` (`gog` recommended, or `gws`): install
+   the CLI, supply a Google OAuth client, authenticate each mailbox read-only.
 3. `mail-index sync --account acct-a --all` (metadata), then `graph build`.
 4. Curate (agent or `curate` wizard).
 5. `mail-index enrich --profile`.
@@ -458,7 +457,7 @@ mail-index/
   src/
     index/                  # schema, migrations, repo (node:sqlite)
     ingest/                 # sync, enrich, classify
-    source/                 # MailSource interface + adapters/gws
+    source/                 # MailSource interface + adapters/{gog,gws}
     graph/                  # graphology build + persistence
     interest/               # scoring + snapshots
     curation/               # profile + wizard

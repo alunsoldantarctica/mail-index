@@ -37,15 +37,16 @@ client**. You have two ways to provide one — see [§2](#2-connect-a-mailbox-pi
 
 ## 1. Install the tool
 
-```sh
-# Global install
-npm i -g mail-index          # or: pnpm add -g mail-index
+Until the npm package is published, install from source:
 
-# …or run without installing
-npx mail-index <command>
+```sh
+git clone https://github.com/alunsoldantarctica/mail-index.git
+cd mail-index && pnpm install && pnpm build
+# invoke as `node dist/cli/index.js <command>` (or symlink it onto your PATH)
 ```
 
-This installs two bins:
+Once published, `npm i -g mail-index` (or `npx mail-index <command>`) will give
+you the two bins directly:
 
 | Bin | Purpose |
 |-----|---------|
@@ -76,36 +77,22 @@ authenticated against your mailbox with **read-only** Gmail scope
 > so the cap is yours to lift (or ignore). Full detail:
 > [docs/oauth-and-verification.md](oauth-and-verification.md).
 
-### Option A — use the mail-index beta OAuth client (skip Google Cloud)
+### Option A — use the mail-index beta OAuth client (skip Google Cloud) — *planned*
 
-The fastest path once you're on the test-user list. **First, request access:** open a
+The intended fastest path. **First, request access:** open a
 [**Beta access request**](https://github.com/alunsoldantarctica/mail-index/issues/new?template=beta_access.yml)
 with the Google address you'll sign in as — we add it to the mail-index app's
 test users (Google requires named testers while the app is in "testing" mode).
-Once we confirm, the `mail-index setup` wizard installs the adapter, places the
-**mail-index** OAuth client for you, and runs the browser sign-in — you never
-touch the Google Cloud console.
+Once you're on the list, a `mail-index setup` wizard will install the adapter,
+place the **mail-index** OAuth client, and run the browser sign-in — no Google
+Cloud console.
 
-```sh
-mail-index setup            # installs gog if needed, places our client, signs you in
-```
-
-Under the hood this does, per mailbox:
-
-```sh
-# 1. install the gog adapter (macOS)
-brew install openclaw/tap/gogcli
-# 2. place the bundled mail-index OAuth client (piped in, not written to disk)
-gog auth credentials -      # mail-index feeds it the client; you are not prompted for one
-# 3. browser sign-in, read-only Gmail only
-gog auth add you@gmail.com --services gmail --gmail-scope=readonly
-```
-
-You'll see an "unverified app — mail-index" consent screen (expected during the
-beta); approve it to grant **read-only** Gmail access. If Google says
-**"access blocked"** or that you're *not a test user*, your address isn't on the
-list yet — [request access](https://github.com/alunsoldantarctica/mail-index/issues/new?template=beta_access.yml)
-(or use Option B).
+**The `setup` wizard isn't built yet**, so today use **Option B** (your own
+client — same end state, just one console visit). When it ships it will, per
+mailbox: install gog, pipe in the bundled client (`gog auth credentials set -`),
+then `gog auth add you@gmail.com --services gmail --gmail-scope=readonly` (you
+approve the "unverified app — mail-index" read-only consent screen; an
+`access blocked / not a test user` error means your address isn't on the list yet).
 
 ### Option B — bring your own Google Cloud OAuth client (no caps)
 
@@ -268,18 +255,23 @@ enriches the hits it returns.
 
 ## 7. Add the MCP server to your agent
 
-The agent surface is the stdio server `mail-index-mcp`. Register it with your
-MCP client. For a Claude Code / Claude Desktop style config:
+The agent surface is the stdio server `mail-index-mcp`. **This step only
+*registers the server*** — do steps 2–4 (connect a mailbox + first sync) first,
+or its tools have nothing to read.
 
-```jsonc
-{
-  "mcpServers": {
-    "mail-index": {
-      "command": "mail-index-mcp"
-    }
-  }
-}
-```
+- **Claude Code:**
+  ```sh
+  claude mcp add --transport stdio mail-index -- mail-index-mcp
+  ```
+  (add `--scope project` to share it via a committed `.mcp.json`; once the
+  package is published you can use `-- npx -y -p mail-index mail-index-mcp`).
+- **Any MCP client — manual config:**
+  ```jsonc
+  { "mcpServers": { "mail-index": { "command": "mail-index-mcp" } } }
+  ```
+- **Claude Desktop (planned):** a one-click `.mcpb` bundle, plus an all-in-one
+  DMG/MSI installer that *does* the local setup (adapter + sign-in + sync) and
+  then registers the server. There is no `claude://` install link.
 
 **Desktop apps launch with a minimal environment** — two practical notes if the
 server fails to start or `get_message` can't enrich:
@@ -361,10 +353,8 @@ the sync on a slower cadence.)
 ## 9. Grow your index intelligently
 
 The whole design is **metadata-wide, bodies-narrow**: index everything cheaply,
-fetch full text only where it earns its place. That keeps the index tiny (~1.6 KB
-per message — ~1.5% of your mailbox size, since it stores metadata + snippets,
-not attachments) and lets you get value in minutes instead of waiting on a full
-sync. A sensible growth path:
+fetch full text only where it earns its place — so you get value in minutes, not
+after a full sync (sizing in the table below). A sensible growth path:
 
 1. **Start recent and cheap.** A first metadata sync runs ~50 messages/min
    (one provider call each), so don't pull years up front:
@@ -394,11 +384,9 @@ sync. A sensible growth path:
 6. **Schedule freshness** (§8) so recent mail stays current without you thinking
    about it.
 
-**Rule of thumb for sizing:** index size ≈ messages × ~1.6 KB (metadata), plus
-~1–3 KB for each body you enrich. 10k messages ≈ ~16 MB; enriching 1k of them
-≈ +~2 MB. It scales with message *count*, not mailbox bytes — a 5 MB email with
-attachments is still ~2 KB in the index. (Measured on a real 6-month, ~8,000-message
-mailbox.)
+**Sizing** scales with message *count*, not mailbox bytes (a 5 MB email with
+attachments is still ~1.6 KB in the index); enriched bodies add ~1–3 KB each.
+Measured on a real 6-month, ~8,000-message mailbox:
 
 | Your mailbox | Index size (metadata) | First sync (one-time) |
 |---|--:|--:|

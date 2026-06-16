@@ -186,8 +186,67 @@ const m002_thread_summary: Migration = {
   },
 };
 
+/**
+ * Migration 3 — per-account mailbox identity (adapter-switch safety).
+ *
+ * An account label is the durable index key — `messages` is keyed by
+ * `(account, gmail_message_id)`, and Gmail message ids are identical whichever
+ * CLI (`gws`, `gog`) fetched them. So a user can switch a label's transport
+ * between adapters and the cached index stays fully valid: a re-sync only pulls
+ * new mail (upsert is idempotent). The one footgun is pointing a label at a
+ * *different mailbox* (e.g. authenticating the new adapter as another address),
+ * which would silently mix two mailboxes' mail under one label.
+ *
+ * This table records the authenticated address the label is bound to (captured
+ * on first sync). The sync identity probe then asserts the adapter still
+ * resolves to that same address before reusing the index — the provider may
+ * change freely, the mailbox identity may not. `provider` is informational
+ * (which adapter last verified the binding).
+ */
+const m003_account_identity: Migration = {
+  version: 3,
+  name: 'account identity (adapter-switch safety)',
+  up: (db) => {
+    db.exec(`
+      CREATE TABLE account_identity (
+        account       TEXT NOT NULL,
+        address       TEXT NOT NULL,
+        provider      TEXT,
+        first_seen    TEXT,
+        last_verified TEXT,
+        PRIMARY KEY (account)
+      );
+    `);
+  },
+};
+
+/**
+ * Migration 4 — OCR-candidate images (agent-OCR design).
+ *
+ * Marketing email increasingly puts the offer/price/deadline inside *images*,
+ * so the distilled `body_text` is near-empty. mail-index never OCRs (that would
+ * need a vision model + network); instead it deterministically picks which
+ * images plausibly carry readable content (see `intelligence/images.ts`) and
+ * stores those candidate URLs here, computed at enrich time. The MCP server then
+ * hands them to the local agent — which has vision — to read. A pure column add;
+ * `ocr_images_json` holds a compact JSON array (`[{src,width,height,alt,score,
+ * reason}]`) or NULL when the body carries no content-bearing images.
+ */
+const m004_ocr_images: Migration = {
+  version: 4,
+  name: 'ocr candidate images',
+  up: (db) => {
+    db.exec(`ALTER TABLE messages ADD COLUMN ocr_images_json TEXT;`);
+  },
+};
+
 /** All migrations, in ascending version order. Append-only. */
-export const MIGRATIONS: readonly Migration[] = [m001_initial, m002_thread_summary];
+export const MIGRATIONS: readonly Migration[] = [
+  m001_initial,
+  m002_thread_summary,
+  m003_account_identity,
+  m004_ocr_images,
+];
 
 /** Read the database's applied schema version (SQLite `user_version`). */
 export function getUserVersion(db: DatabaseSync): number {

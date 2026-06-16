@@ -7,8 +7,14 @@ layer talks to the MailSource adapter"). Keeping the provider behind this
 interface keeps each provider's setup tax a **swappable** concern, not a
 permanent one.
 
-v1 ships the **gws adapter** (Gmail via the `gws` CLI). DirectGmail and IMAP
-adapters are v1.x. This document is for anyone writing a new one.
+Two Gmail adapters ship today, both read-only and both needing a Google OAuth
+client (their own or a shared one — gog does **not** ship a working built-in
+client): the **gog adapter** (recommended — Gmail via the
+[`gog`](https://github.com/openclaw/gogcli) CLI; Homebrew-installable, clean
+JSON, `--gmail-no-send`) and the **gws adapter** (Gmail via Google's
+[`gws`](https://github.com/googleworkspace/cli) CLI). Both share the Gmail-REST → neutral-record
+mapping in `src/source/adapters/gmail-shared.ts`. IMAP and other providers are
+future work. This document is for anyone writing a new one.
 
 ---
 

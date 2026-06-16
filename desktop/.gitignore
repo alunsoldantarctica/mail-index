@@ -1,0 +1,12 @@
+# Node
+node_modules/
+dist/
+
+# Rust / Tauri
+src-tauri/target/
+
+# Injected build-time secret (OAuth client) — never commit
+src-tauri/resources/google-oauth-client.json
+
+# OS
+.DS_Store

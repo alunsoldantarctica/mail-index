@@ -221,3 +221,56 @@ test('a failing source closes the audit row with an error and releases the lock'
   assert.match(row.error ?? '', /provider exploded/);
   assert.equal(repo.activeSyncRun(ACCOUNT), undefined, 'lock released after failure');
 });
+
+// --- Identity guard (migration 3): adapter-switch safety ---------------------
+
+/**
+ * A MailSource that serves the DEFAULT_FIXTURES messages but with a caller-set
+ * provider id and authenticated address — to simulate the *same* mailbox seen
+ * through a different transport (gws ↔ gog), or a *different* mailbox mistakenly
+ * bound to the same label.
+ */
+function sourceAs(provider: string, address: string): FakeMailSource {
+  const s = new FakeMailSource({ ...DEFAULT_FIXTURES, address });
+  Object.defineProperty(s, 'provider', { value: provider });
+  return s;
+}
+
+test('identity guard: first sync pins the label to the authenticated mailbox', async () => {
+  const repo = freshRepo();
+  await syncMetadata({ account: ACCOUNT, source: sourceAs('gws', 'al@example.com'), repo });
+  const id = repo.getAccountIdentity(ACCOUNT);
+  assert.ok(id);
+  assert.equal(id.address, 'al@example.com');
+  assert.equal(id.provider, 'gws');
+});
+
+test('identity guard: switching transport on the same mailbox reuses the index', async () => {
+  const repo = freshRepo();
+  await syncMetadata({ account: ACCOUNT, source: sourceAs('gws', 'al@example.com'), repo });
+  const countAfterGws = repo.countMessages(ACCOUNT);
+
+  // Same mailbox, different adapter — must succeed and NOT wipe/duplicate rows.
+  const second = await syncMetadata({
+    account: ACCOUNT,
+    source: sourceAs('gog', 'al@example.com'),
+    repo,
+  });
+  assert.ok(second.runId > 0);
+  assert.equal(repo.countMessages(ACCOUNT), countAfterGws, 'cached rows reused, not re-keyed');
+  assert.equal(repo.getAccountIdentity(ACCOUNT)?.provider, 'gog', 'provider refreshed');
+});
+
+test('identity guard: a different mailbox under the same label is refused', async () => {
+  const repo = freshRepo();
+  await syncMetadata({ account: ACCOUNT, source: sourceAs('gws', 'al@example.com'), repo });
+  const before = repo.countMessages(ACCOUNT);
+
+  await assert.rejects(
+    syncMetadata({ account: ACCOUNT, source: sourceAs('gog', 'someone-else@example.com'), repo }),
+    (err: Error) => err instanceof SyncError && /refusing to sync/.test(err.message),
+  );
+  // The mismatched sweep wrote nothing — the cache is protected.
+  assert.equal(repo.countMessages(ACCOUNT), before);
+  assert.equal(repo.getAccountIdentity(ACCOUNT)?.address, 'al@example.com', 'identity unchanged');
+});

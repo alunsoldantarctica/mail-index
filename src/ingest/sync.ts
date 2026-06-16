@@ -124,6 +124,37 @@ function acquireLock(repo: Repo, account: string, selector: string | null): numb
 }
 
 /**
+ * Pin an account label to the mailbox it first indexed (migration 3). On first
+ * sync, records the authenticated address as the label's identity. On every
+ * later sync, asserts the adapter still resolves to that same address — so a
+ * transport switch (gws ↔ gog) to the *same* mailbox reuses the cached index,
+ * while accidentally pointing the label at a *different* mailbox is blocked
+ * before any row is written. The provider may change; the mailbox may not.
+ */
+function guardAccountIdentity(
+  repo: Repo,
+  account: string,
+  address: string,
+  provider: string,
+): void {
+  const existing = repo.getAccountIdentity(account);
+  if (!existing) {
+    repo.setAccountIdentity(account, address, provider);
+    return;
+  }
+  if (existing.address.toLowerCase() !== address.toLowerCase()) {
+    throw new SyncError(
+      `account "${account}" is indexed for mailbox <${existing.address}>, but the ` +
+        `"${provider}" adapter authenticated as <${address}> — refusing to sync, to avoid ` +
+        `mixing two mailboxes under one label. Point the label back at <${existing.address}>, ` +
+        `or use a separate label for <${address}> (whose index is kept independent).`,
+    );
+  }
+  // Same mailbox, possibly a new transport: refresh provider + last_verified.
+  repo.setAccountIdentity(account, existing.address, provider);
+}
+
+/**
  * Run a phase-1 metadata sweep over `scope` for one account.
  *
  * Steps: probe identity (so the account's own address feeds `direction`
@@ -152,9 +183,19 @@ export async function syncMetadata(options: SyncOptions): Promise<SyncResult> {
   const knownAddresses: string[] = [];
   try {
     const identity = await source.check();
-    if (identity.ok && identity.address) knownAddresses.push(identity.address);
-  } catch {
-    // Probe failure is tolerated; classification falls back to labels alone.
+    if (identity.ok && identity.address) {
+      knownAddresses.push(identity.address);
+      // Adapter-switch safety: pin the label to the mailbox it first indexed.
+      // The transport (gws ↔ gog) may change freely — the cached index keys on
+      // (account, gmail_message_id) and Gmail ids are provider-independent, so a
+      // switch reuses every row. But the bound *mailbox* may not change: that
+      // would mix two mailboxes under one label. Block the mismatch up front.
+      guardAccountIdentity(repo, account, identity.address, source.provider);
+    }
+  } catch (err) {
+    // A deliberate identity mismatch is fatal (protects the cache); any other
+    // probe failure is tolerated (classification falls back to labels alone).
+    if (err instanceof SyncError) throw err;
   }
 
   const runId = acquireLock(repo, account, selector);

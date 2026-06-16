@@ -1,0 +1,11 @@
+{
+  "_comment": "PLACEHOLDER. The real Google Desktop OAuth client is injected at BUILD TIME from Bitwarden Secrets Manager (key: mail-index/GOOGLE_OAUTH_CLIENT) into resources/google-oauth-client.json. That real file is gitignored and MUST NOT be committed. See README.md > Build-time secret injection.",
+  "installed": {
+    "client_id": "REPLACED_AT_BUILD_TIME.apps.googleusercontent.com",
+    "project_id": "mail-index",
+    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "client_secret": "REPLACED_AT_BUILD_TIME",
+    "redirect_uris": ["http://localhost"]
+  }
+}

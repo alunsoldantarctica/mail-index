@@ -16,6 +16,7 @@ import { resolveAccount, type AccountConfig, type OperatorConfig } from '../conf
 import { Repo, type MessageRow } from '../index/repo.js';
 import type { MailSource } from '../source/index.js';
 import { enrichOne } from '../ingest/enrich.js';
+import { isLikelyImageOnly } from '../intelligence/images.js';
 
 import { buildSource } from './sync.js';
 
@@ -127,6 +128,21 @@ export function formatShow(result: ShowResult): string {
   lines.push(`flags:    ${flags.join(', ')}`);
   lines.push(`body:     ${row.body_state}${enriched ? ' (just enriched)' : ''}`);
 
+  // OCR candidates: when the offer lives in images rather than text, list the
+  // content-bearing images so an agent (or the reader) can open + read them.
+  // mail-index never OCRs — it only points at the images.
+  const ocr = parseOcrImages(row.ocr_images_json);
+  if (ocr.length > 0) {
+    const thin = isLikelyImageOnly(row.body_text, ocr.length);
+    lines.push(
+      `images:   ${ocr.length} OCR candidate(s)${thin ? ' — offer likely in images, not text' : ''}`,
+    );
+    for (const img of ocr.slice(0, 6)) {
+      const dim = img.width && img.height ? ` (${img.width}x${img.height})` : '';
+      lines.push(`            • ${img.src}${dim}`);
+    }
+  }
+
   lines.push('');
   if (row.body_state === 'full' && row.body_text) {
     lines.push(row.body_text);
@@ -138,4 +154,22 @@ export function formatShow(result: ShowResult): string {
   }
 
   return lines.join('\n') + '\n';
+}
+
+/** A stored OCR-candidate image, as much as `show` renders of it. */
+interface OcrImage {
+  src: string;
+  width?: number | null;
+  height?: number | null;
+}
+
+/** Parse `ocr_images_json` into a render-ready list (or `[]` on absent/bad JSON). */
+function parseOcrImages(json: string | null): OcrImage[] {
+  if (!json) return [];
+  try {
+    const v: unknown = JSON.parse(json);
+    return Array.isArray(v) ? (v as OcrImage[]).filter((x) => x && typeof x.src === 'string') : [];
+  } catch {
+    return [];
+  }
 }

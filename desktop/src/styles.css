@@ -1,0 +1,173 @@
+:root {
+  --bg: #0f1115;
+  --panel: #181b22;
+  --border: #2a2f3a;
+  --text: #e7e9ee;
+  --muted: #9aa3b2;
+  --accent: #4f8cff;
+  --pending: #5a6172;
+  --running: #e0a82e;
+  --done: #38c172;
+  --action: #ff6b6b;
+  font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+}
+
+main {
+  padding: 20px 24px 24px;
+  max-width: 720px;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.sub {
+  margin: 4px 0 16px;
+  color: var(--muted);
+}
+
+.account-bar {
+  display: grid;
+  grid-template-columns: auto 1fr auto 120px;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.account-bar label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+input {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.stepper {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.step {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex: 0 0 auto;
+  background: var(--pending);
+}
+
+.dot[data-status="running"] {
+  background: var(--running);
+  animation: pulse 1s infinite;
+}
+.dot[data-status="done"] {
+  background: var(--done);
+}
+.dot[data-status="action-needed"] {
+  background: var(--action);
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.body {
+  flex: 1;
+}
+
+.body h2 {
+  margin: 0 0 2px;
+  font-size: 15px;
+}
+
+.body p {
+  margin: 0 0 8px;
+  color: var(--muted);
+}
+
+code {
+  background: #000;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+button.ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.log {
+  margin-top: 16px;
+}
+
+.log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.log-head h3 {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+#log {
+  background: #000;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  height: 160px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  margin: 6px 0 0;
+}

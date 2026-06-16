@@ -20,6 +20,7 @@
 import { expandHome, resolveAccount, type AccountConfig, type OperatorConfig } from '../config/index.js';
 import { Repo } from '../index/repo.js';
 import { GwsAdapter } from '../source/adapters/gws/index.js';
+import { GogAdapter } from '../source/adapters/gog/index.js';
 import type { MailScope, MailSource } from '../source/index.js';
 import { syncMetadata, type SyncResult } from '../ingest/sync.js';
 import { buildGraph } from '../graph/index.js';
@@ -40,7 +41,9 @@ export interface SyncFlags {
 export function buildSource(account: AccountConfig): MailSource {
   switch (account.adapter) {
     case 'gws':
-      return new GwsAdapter({ configDir: expandHome(account.configDir) });
+      return new GwsAdapter({ configDir: expandHome(account.configDir ?? '') });
+    case 'gog':
+      return new GogAdapter({ account: account.account ?? '' });
     default: {
       // Exhaustiveness guard: AccountConfig.adapter is a closed union, but a
       // future adapter id added to config must be wired here too.

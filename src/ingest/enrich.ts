@@ -28,6 +28,7 @@ import type { MailSource } from '../source/index.js';
 import type { MetaSelector, Repo } from '../index/repo.js';
 import { IndexError } from '../index/db.js';
 import { distill } from './distill.js';
+import { selectOcrCandidates } from '../intelligence/images.js';
 
 /** Error thrown when an enrich run cannot start or run. */
 export class EnrichError extends Error {
@@ -120,6 +121,13 @@ async function promoteOne(account: string, id: string, source: MailSource, repo:
     mimeType: full.mimeType,
   });
 
+  // Deterministically pick which images plausibly carry readable content (the
+  // offer may live in a hero graphic, not text). mail-index never OCRs — it
+  // stores the candidate URLs so the local agent can read them. Pure + local
+  // (no network); stored only when the HTML yields content-bearing images.
+  const ocrCandidates = full.bodyHtml ? selectOcrCandidates(full.bodyHtml) : [];
+  const ocrImagesJson = ocrCandidates.length > 0 ? JSON.stringify(ocrCandidates) : null;
+
   // Promote to full. The repo's upsert overwrites every metadata column from
   // the input (ON CONFLICT DO UPDATE SET …), so we re-supply the full metadata
   // the provider just returned rather than a sparse {id, bodyText} — otherwise
@@ -149,6 +157,7 @@ async function promoteOne(account: string, id: string, source: MailSource, repo:
     snippet: full.snippet,
     bodyState: 'full',
     bodyText,
+    ocrImagesJson,
   });
   return true;
 }
