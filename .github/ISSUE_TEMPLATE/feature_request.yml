@@ -1,0 +1,16 @@
+name: 💡 Feature request / feedback
+description: Suggest an improvement, a new adapter, or share how it's working for you.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like, and why?
+      description: The use case matters more than the implementation — what are you trying to do?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: Alternatives you've considered, prior art, links. (Redact anything private.)

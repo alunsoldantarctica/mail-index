@@ -266,6 +266,20 @@ without handing them the keys to it.
 
 More: **[unsold.group/al](https://unsold.group/al)**
 
+## Feedback & contact
+
+There's **no telemetry** — we only know what you tell us, so feedback is
+genuinely welcome:
+
+- 💬 **[Discussions](https://github.com/alunsoldantarctica/mail-index/discussions)** — questions, ideas, how you use it
+- 🐞 **[Report a bug](https://github.com/alunsoldantarctica/mail-index/issues/new?template=bug_report.yml)** · 💡 **[Request a feature](https://github.com/alunsoldantarctica/mail-index/issues/new?template=feature_request.yml)**
+- 🔒 Security/privacy issues → **[SECURITY.md](SECURITY.md)** (private)
+- 🌐 **[unsold.group/al](https://unsold.group/al)**
+
+Inside your agent you can also just say *"report a mail-index bug"* — the MCP
+server points the agent to a GitHub link for you to submit (it never sends
+anything itself). See **[SUPPORT.md](SUPPORT.md)**.
+
 ## License
 
 [MIT](LICENSE)

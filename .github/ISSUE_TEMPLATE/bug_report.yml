@@ -1,0 +1,49 @@
+name: 🐞 Bug report
+description: Something didn't work as expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Thanks for reporting. mail-index has **no telemetry** — we only know what
+        you tell us, so details genuinely help. ⚠️ Please **redact real email
+        content, addresses, and secrets** before pasting anything.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. mail-index sync --account …
+        2. …
+        3. see error
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where did it happen?
+      options:
+        - CLI (mail-index)
+        - MCP server (mail-index-mcp)
+        - Both / not sure
+  - type: input
+    id: version
+    attributes:
+      label: mail-index version
+      description: From `package.json`, or `npm ls mail-index`.
+  - type: input
+    id: env
+    attributes:
+      label: OS + Node version
+      placeholder: "macOS 15 · node v24.x  (run `node -v`)"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output / logs
+      description: Error text or terminal output. **Redact email content & secrets.**
+      render: shell

@@ -339,7 +339,19 @@ export function toolList(): { name: string; description: string; inputSchema: Js
 export function buildServer(ctx: ToolContext): Server {
   const server = new Server(
     { name: 'mail-index', version: '1.0.0' },
-    { capabilities: { tools: {} } },
+    {
+      capabilities: { tools: {} },
+      // Surfaced to the agent once at connect (no per-tool token cost). mail-index
+      // has no telemetry, so feedback is explicit + opt-in: point the user at
+      // GitHub. Nothing is ever sent automatically.
+      instructions:
+        'mail-index — local, read-only mail recall over an MCP. No telemetry; ' +
+        'the index never leaves this machine. Found a bug or have feedback? ' +
+        'There is no automatic reporting — please open an issue at ' +
+        'https://github.com/alunsoldantarctica/mail-index/issues (or Discussions ' +
+        'for questions). When asked to "report a bug" or "send feedback", help ' +
+        'the user draft it and give them that link to submit themselves.',
+    },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: toolList() }));
