@@ -65,8 +65,10 @@ message detail → `results-accuracy.local.md` (gitignored).
 
 ## Files
 
-- `run.mjs` — token harness (mail-index MCP over stdio vs Gmail API via `gws`).
+- `run.mjs` — token harness (mail-index MCP over stdio vs Gmail API via `gws`);
+  runs a **30 common-use-case suite** (aggregation / recall / read / relational).
 - `accuracy.mjs` — recall × token matrix (query distillation vs one mail-index phrase).
+- `RESULTS-USECASES.md` — committed 30-use-case token table (regenerate with `run.mjs`).
 - `RESULTS.md` — committed aggregate recall/token table (regenerate with `accuracy.mjs`).
 - `gmail-mcp-tools.json` — a representative stock Gmail MCP tool surface, used
   only for the fixed schema-tax line. Swap in a live server's `tools/list` via

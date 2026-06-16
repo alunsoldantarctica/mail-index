@@ -157,18 +157,52 @@ const gmailGet = (id, format) =>
 
 // ---- the task suite (generic; queries derive real ids at runtime) ---------
 
+// 30 common use cases. kind drives the Gmail cost model:
+//   recall  — find one message: list + top-3 metadata gets to identify it.
+//   read    — read one message fully: list + 1 format=full get.
+//   scan    — aggregate over many ("list all X"): list + one metadata get PER MATCH
+//             (sampled avg × match count). You must read each to answer.
+//   relational — contacts/graph/"what did I miss": the stock Gmail MCP has no
+//             primitive, so it must scan + aggregate the mailbox (modeled as a
+//             scan over the broad query). mail-index answers from precomputed
+//             structure in one compact call.
+const S = 200; // mail-index search limit for scan/relational
 const TASKS = [
-  // RECALL — find one message (Gmail: list + a few metadata gets to identify it).
-  { kind: 'recall', label: 'recall: an invite or event', mi: { tool: 'search', args: { query: 'invite event', limit: 5 } }, gmailQ: 'invite OR event' },
-  { kind: 'recall', label: 'recall: a refund / payment', mi: { tool: 'search', args: { query: 'refund payment receipt', limit: 5 } }, gmailQ: 'refund OR receipt OR payment' },
-  { kind: 'recall', label: 'recall: a security/login alert', mi: { tool: 'search', args: { query: 'login security alert', limit: 5 } }, gmailQ: 'security alert OR login' },
-  // READ — put one full message in context (Gmail: messages.get format=full).
-  { kind: 'read', label: 'read the single most relevant message', mi: { tool: 'read-top', args: { query: 'invite event', limit: 1 } }, gmailQ: 'invite OR event' },
-  // SCAN — answer an AGGREGATION over many messages. Gmail must fetch EVERY match
-  // to read it; mail-index returns the whole compact set in one ranked call.
-  { kind: 'scan', label: 'scan: all purchases / receipts (6mo)', mi: { tool: 'search', args: { query: 'receipt OR order OR invoice OR payment OR purchase OR dispatched OR refund', limit: 200 } }, gmailQ: 'receipt OR order OR invoice OR payment OR purchase OR dispatched OR refund newer_than:6m' },
-  { kind: 'scan', label: 'scan: every newsletter / digest (6mo)', mi: { tool: 'search', args: { query: 'newsletter OR digest OR weekly OR briefing OR unsubscribe', limit: 200 } }, gmailQ: 'unsubscribe OR newsletter OR digest newer_than:6m' },
-  { kind: 'scan', label: 'scan: all meetings / calendar invites (6mo)', mi: { tool: 'search', args: { query: 'invite OR meeting OR calendar OR scheduled OR rsvp', limit: 200 } }, gmailQ: 'invite OR meeting OR calendar OR rsvp newer_than:6m' },
+  // ---- A. Aggregation / "list all …" (scan) ----
+  { cat: 'aggregate', kind: 'scan', label: 'all supplier / vendor emails (6mo)', mi: { tool: 'search', args: { query: 'invoice OR purchase order OR quote OR supplier OR vendor OR shipment OR delivery', limit: S } }, gmailQ: 'invoice OR "purchase order" OR quote OR supplier OR vendor OR shipment newer_than:6m' },
+  { cat: 'aggregate', kind: 'scan', label: 'all purchases & receipts (6mo)', mi: { tool: 'search', args: { query: 'receipt OR order OR invoice OR payment OR purchase OR dispatched OR refund', limit: S } }, gmailQ: 'receipt OR order OR invoice OR payment OR purchase OR dispatched OR refund newer_than:6m' },
+  { cat: 'aggregate', kind: 'scan', label: 'all invoices received (6mo)', mi: { tool: 'search', args: { query: 'invoice OR bill OR amount due OR statement', limit: S } }, gmailQ: 'invoice OR bill OR "amount due" OR statement newer_than:6m' },
+  { cat: 'aggregate', kind: 'scan', label: 'all newsletters / subscriptions (6mo)', mi: { tool: 'search', args: { query: 'newsletter OR digest OR weekly OR briefing OR unsubscribe', limit: S } }, gmailQ: 'unsubscribe OR newsletter OR digest newer_than:6m' },
+  { cat: 'aggregate', kind: 'scan', label: 'all meetings / calendar invites (6mo)', mi: { tool: 'search', args: { query: 'invite OR meeting OR calendar OR scheduled OR rsvp', limit: S } }, gmailQ: 'invite OR meeting OR calendar OR rsvp newer_than:6m' },
+  { cat: 'aggregate', kind: 'scan', label: 'all travel / flight / hotel confirmations (6mo)', mi: { tool: 'search', args: { query: 'flight OR booking OR reservation OR itinerary OR hotel OR check-in', limit: S } }, gmailQ: 'flight OR booking OR reservation OR itinerary OR hotel newer_than:6m' },
+  { cat: 'aggregate', kind: 'scan', label: 'all shipping / delivery notifications (6mo)', mi: { tool: 'search', args: { query: 'shipped OR dispatched OR delivery OR tracking OR out for delivery', limit: S } }, gmailQ: 'shipped OR dispatched OR delivery OR tracking newer_than:6m' },
+  { cat: 'aggregate', kind: 'scan', label: 'all bank / financial statements (6mo)', mi: { tool: 'search', args: { query: 'statement OR balance OR deposit OR transaction OR account summary', limit: S } }, gmailQ: 'statement OR balance OR deposit OR transaction newer_than:6m' },
+  { cat: 'aggregate', kind: 'scan', label: 'all recruiter / job emails (6mo)', mi: { tool: 'search', args: { query: 'role OR position OR opportunity OR recruiter OR hiring OR interview', limit: S } }, gmailQ: 'role OR position OR opportunity OR recruiter OR hiring newer_than:6m' },
+  { cat: 'aggregate', kind: 'scan', label: 'all customer-support threads (6mo)', mi: { tool: 'search', args: { query: 'support OR ticket OR case OR enquiry OR help OR issue', limit: S } }, gmailQ: 'support OR ticket OR case OR enquiry OR issue newer_than:6m' },
+  { cat: 'aggregate', kind: 'scan', label: 'all password-reset / security alerts (6mo)', mi: { tool: 'search', args: { query: 'security alert OR password OR verify OR login OR sign-in OR code', limit: S } }, gmailQ: '"security alert" OR password OR verify OR login OR "sign-in" newer_than:6m' },
+  { cat: 'aggregate', kind: 'scan', label: 'all event invitations (6mo)', mi: { tool: 'search', args: { query: 'invited OR join us OR event OR webinar OR rsvp OR you are invited', limit: S } }, gmailQ: 'invited OR event OR webinar OR rsvp newer_than:6m' },
+  { cat: 'aggregate', kind: 'scan', label: 'all subscription / recurring charges (6mo)', mi: { tool: 'search', args: { query: 'subscription OR renew OR auto-renew OR billed OR your plan OR membership', limit: S } }, gmailQ: 'subscription OR renew OR billed OR membership newer_than:6m' },
+  { cat: 'aggregate', kind: 'scan', label: 'everything about insurance (6mo)', mi: { tool: 'search', args: { query: 'insurance OR policy OR coverage OR claim OR premium', limit: S } }, gmailQ: 'insurance OR policy OR coverage OR claim newer_than:6m' },
+  { cat: 'aggregate', kind: 'scan', label: 'all messages mentioning a contract (6mo)', mi: { tool: 'search', args: { query: 'contract OR agreement OR signature OR terms OR sign here', limit: S } }, gmailQ: 'contract OR agreement OR signature OR terms newer_than:6m' },
+
+  // ---- B. Recall / find-one (generic real-world intents) ----
+  { cat: 'recall', kind: 'recall', label: 'a payment / account deposit confirmation', mi: { tool: 'search', args: { query: 'deposit confirmation payment', limit: 5 } }, gmailQ: 'deposit OR "payment confirmation"' },
+  { cat: 'recall', kind: 'recall', label: 'a security alert email', mi: { tool: 'search', args: { query: 'security alert', limit: 5 } }, gmailQ: '"security alert"' },
+  { cat: 'recall', kind: 'recall', label: 'an event invitation', mi: { tool: 'search', args: { query: 'event invitation rsvp', limit: 5 } }, gmailQ: 'invitation OR rsvp OR event' },
+  { cat: 'recall', kind: 'recall', label: 'a refund notification', mi: { tool: 'search', args: { query: 'refund order', limit: 5 } }, gmailQ: 'refund' },
+  { cat: 'recall', kind: 'recall', label: 'a recruiter / job-opportunity message', mi: { tool: 'search', args: { query: 'role opportunity recruiter', limit: 5 } }, gmailQ: 'role OR recruiter OR opportunity' },
+  { cat: 'recall', kind: 'recall', label: 'a recent order / dispatch confirmation', mi: { tool: 'search', args: { query: 'order dispatched confirmation', limit: 5 } }, gmailQ: 'order OR dispatched OR confirmation' },
+  { cat: 'recall', kind: 'recall', label: 'an appointment / booking confirmation', mi: { tool: 'search', args: { query: 'appointment booking confirmed', limit: 5 } }, gmailQ: 'appointment OR booking OR confirmed' },
+  { cat: 'recall', kind: 'recall', label: 'a news / market briefing', mi: { tool: 'search', args: { query: 'market economy briefing', limit: 5 } }, gmailQ: 'market OR economy OR briefing' },
+  { cat: 'recall', kind: 'recall', label: 'a payment receipt', mi: { tool: 'search', args: { query: 'receipt payment', limit: 5 } }, gmailQ: 'receipt OR "payment to"' },
+  { cat: 'recall', kind: 'recall', label: 'a login / verification-code notice', mi: { tool: 'search', args: { query: 'login verification code new device', limit: 5 } }, gmailQ: '"new device" OR "verification code" OR "login attempt"' },
+
+  // ---- C. Read / relationship / "what did I miss" ----
+  { cat: 'read', kind: 'read', label: 'read the single most relevant invoice', mi: { tool: 'read-top', args: { query: 'invoice amount due', limit: 1 } }, gmailQ: 'invoice OR "amount due"' },
+  { cat: 'read', kind: 'read', label: 'read the latest order/shipping update', mi: { tool: 'read-top', args: { query: 'order shipped delivery', limit: 1 } }, gmailQ: 'order OR shipped OR delivery' },
+  { cat: 'relational', kind: 'relational', label: 'who do I correspond with most (top contacts)', mi: { tool: 'list_contacts', args: { sort: 'engagement', limit: 25 } }, gmailQ: 'newer_than:6m' },
+  { cat: 'relational', kind: 'relational', label: 'which companies do I have back-and-forth with', mi: { tool: 'list_contacts', args: { filter: 'correspondent', limit: 25 } }, gmailQ: 'newer_than:6m -category:promotions' },
+  { cat: 'relational', kind: 'relational', label: 'catch me up on what I missed this week', mi: { tool: 'catch_up', args: { since: '7d' } }, gmailQ: 'newer_than:7d' },
 ];
 
 const SCAN_SAMPLE = 8; // real gets sampled per scan to derive avg cost, then extrapolate
@@ -220,11 +254,13 @@ async function runTask(mcp, t) {
   let gmailCalls;
   let note = '';
 
-  if (t.kind === 'scan') {
-    // SCAN: to ANSWER the aggregation the agent must read EVERY match. Gmail
-    // list returns ids only, so cost = list + get×(matchN). We fetch a real
-    // sample to get avg get-cost, then extrapolate to the true match count
-    // (metadata format — generous to Gmail; full would be ~2.5× worse).
+  if (t.kind === 'scan' || t.kind === 'relational') {
+    // SCAN/RELATIONAL: to ANSWER, the agent must read EVERY match. Gmail list
+    // returns ids only, so cost = list + get×(matchN). (For relational tasks —
+    // top contacts, "what did I miss" — Gmail has no primitive, so it must scan
+    // + aggregate the mailbox; same cost model.) We fetch a real sample for avg
+    // get-cost, then extrapolate to the match count (metadata format — generous
+    // to Gmail; full would be ~2.5× worse).
     const listRaw = await gmailList(t.gmailQ, 200);
     const ids = (JSON.parse(listRaw).messages ?? []).map((m) => m.id);
     const matchN = ids.length;
@@ -258,7 +294,7 @@ async function runTask(mcp, t) {
     gmailTok = await countTokens(gmailText);
   }
 
-  return { label: t.label, kind: t.kind, miCalls, miTok, miHits, gmailCalls, gmailTok, note };
+  return { cat: t.cat, label: t.label, kind: t.kind, miCalls, miTok, miHits, gmailCalls, gmailTok, note };
 }
 
 function safeHitCount(text) {
@@ -305,59 +341,57 @@ async function main() {
   const sumGm = rows.reduce((a, r) => a + r.gmailTok, 0);
   const ratio = (g, m) => (m > 0 ? (g / m).toFixed(1) + '×' : '—');
 
-  // full table (may contain real-data-derived token counts; safe) → file
+  // Task labels are generic and token counts carry no message content, so the
+  // table is COMMITTABLE (bench/RESULTS-USECASES.md). Grouped by category.
+  const CATS = [
+    ['aggregate', 'A. Aggregation — "list all …" (read every match)'],
+    ['recall', 'B. Recall — find one message'],
+    ['read', 'C. Read one message in full'],
+    ['relational', 'D. Relational — contacts / "what did I miss" (no Gmail primitive)'],
+  ];
   const lines = [];
-  lines.push('# mail-index vs stock Gmail-API MCP — token benchmark (operator-local)');
+  lines.push('# 30 common use cases — mail-index vs a stock Gmail-API MCP (token cost)');
   lines.push('');
-  lines.push(`Account: \`${ACCOUNT}\` · token count: ${COUNT_MODE}`);
+  lines.push(`Tokens an agent's context pays to **answer** each question. Account \`${ACCOUNT}\` · token count: ${COUNT_MODE} · reproduce: \`node bench/run.mjs\`.`);
   lines.push('');
-  lines.push('## Fixed schema tax (injected every turn)');
+  lines.push('**Fixed schema tax** (every turn): mail-index ' + `${tax.miTax} tok (${tax.miCount} tools)` + (tax.gmailTax != null ? ` · stock Gmail MCP ${tax.gmailTax} tok (${tax.gmailCount} tools)` : '') + '.');
   lines.push('');
-  lines.push('| Server | Tools | Schema tokens |');
-  lines.push('|---|--:|--:|');
-  lines.push(`| mail-index | ${tax.miCount} | ${tax.miTax} |`);
-  if (tax.gmailTax != null)
-    lines.push(`| stock Gmail MCP (fixture) | ${tax.gmailCount} | ${tax.gmailTax} |`);
-  lines.push('');
-  lines.push('## Per-task result tax (tokens returned to answer the question)');
-  lines.push('');
-  lines.push('| Task | mail-index (calls / tokens) | Gmail API (calls / tokens) | Savings |');
-  lines.push('|---|--:|--:|--:|');
-  for (const r of rows)
-    lines.push(
-      `| ${r.label} | ${r.miCalls} / ${r.miTok} | ${r.gmailCalls} / ${r.gmailTok} | ${ratio(r.gmailTok, r.miTok)} |`,
-    );
-  lines.push(`| **TOTAL** | **${sumMi}** | **${sumGm}** | **${ratio(sumGm, sumMi)}** |`);
-  lines.push('');
-  const scanNotes = rows.filter((r) => r.kind === 'scan' && r.note);
-  if (scanNotes.length) {
-    lines.push('Scan-task Gmail cost detail (linear in matches):');
-    for (const r of scanNotes) lines.push(`- ${r.label}: ${r.note}`);
+  for (const [cat, title] of CATS) {
+    const group = rows.filter((r) => r.cat === cat);
+    if (!group.length) continue;
+    const gMi = group.reduce((a, r) => a + r.miTok, 0);
+    const gGm = group.reduce((a, r) => a + r.gmailTok, 0);
+    lines.push(`## ${title}`);
+    lines.push('');
+    lines.push('| Use case | mail-index (calls / tok) | Gmail MCP (calls / tok) | Savings |');
+    lines.push('|---|--:|--:|--:|');
+    for (const r of group)
+      lines.push(`| ${r.label} | ${r.miCalls} / ${r.miTok.toLocaleString()} | ${r.gmailCalls} / ${r.gmailTok.toLocaleString()} | ${ratio(r.gmailTok, r.miTok)} |`);
+    lines.push(`| **subtotal (${group.length})** | **${gMi.toLocaleString()}** | **${gGm.toLocaleString()}** | **${ratio(gGm, gMi)}** |`);
     lines.push('');
   }
-  lines.push(
-    '> Gmail model: recall = list + top-3 metadata gets; read = 1 full get; ' +
-      'scan = list + one metadata get per MATCH (sampled avg × match count). ' +
-      'All generous to Gmail (metadata not full; real agents also guess queries and fetch more).',
-  );
-  const outPath = join(HERE, 'results.local.md');
-  writeFileSync(outPath, lines.join('\n') + '\n');
+  lines.push(`## Overall (${rows.length} use cases)`);
+  lines.push('');
+  lines.push('| | mail-index | Gmail MCP | Savings |');
+  lines.push('|---|--:|--:|--:|');
+  lines.push(`| total tokens to answer | **${sumMi.toLocaleString()}** | **${sumGm.toLocaleString()}** | **${ratio(sumGm, sumMi)}** |`);
+  lines.push('');
+  lines.push('> Gmail cost model (generous to Gmail): recall = list + top-3 metadata gets; read = 1 full get; aggregate/relational = list + one *metadata* get per match (sampled avg × match count; full payloads are ~2.5× heavier). Gmail `list` returns ids only, so every match must be fetched to be read. Relational tasks (top contacts, "what did I miss") have no Gmail primitive — the agent must scan + aggregate the mailbox; mail-index answers from precomputed structure in one compact call. Match counts cap at the Gmail API page size, so large aggregations are *under*-counted for Gmail.');
+  writeFileSync(join(HERE, 'RESULTS-USECASES.md'), lines.join('\n') + '\n');
 
-  // safe aggregate summary → stdout
-  console.log('\n=== mail-index vs stock Gmail-API MCP — token benchmark ===');
+  // stdout summary
+  console.log('\n=== 30 use cases — mail-index vs stock Gmail-API MCP (tokens to answer) ===');
   console.log(`token count: ${COUNT_MODE}`);
-  console.log(
-    `schema tax:   mail-index ${tax.miTax} tok (${tax.miCount} tools)` +
-      (tax.gmailTax != null ? `  vs Gmail ${tax.gmailTax} tok (${tax.gmailCount} tools)` : ''),
-  );
-  console.log(`per-task tax: mail-index ${sumMi} tok  vs Gmail ${sumGm} tok  →  ${ratio(sumGm, sumMi)} less`);
-  for (const r of rows.filter((x) => x.kind === 'scan')) {
-    console.log(
-      `  scan "${r.label.replace(/^scan: /, '')}": mail-index ${r.miTok} tok (1 call, ${r.miHits ?? '?'} hits)` +
-        `  vs Gmail ${r.gmailTok} tok (${r.gmailCalls} calls) → ${ratio(r.gmailTok, r.miTok)} less`,
-    );
+  console.log(`schema tax:   mail-index ${tax.miTax} tok (${tax.miCount} tools)` + (tax.gmailTax != null ? `  vs Gmail ${tax.gmailTax} tok (${tax.gmailCount} tools)` : ''));
+  for (const [cat, title] of CATS) {
+    const g = rows.filter((r) => r.cat === cat);
+    if (!g.length) continue;
+    const gMi = g.reduce((a, r) => a + r.miTok, 0);
+    const gGm = g.reduce((a, r) => a + r.gmailTok, 0);
+    console.log(`  ${title.split('—')[0].trim().padEnd(16)} (${g.length})  mail-index ${gMi.toLocaleString().padStart(7)} tok  vs Gmail ${gGm.toLocaleString().padStart(9)} tok  → ${ratio(gGm, gMi)}`);
   }
-  console.log(`full table → ${outPath} (gitignored; may name real senders)`);
+  console.log(`OVERALL (${rows.length}):  mail-index ${sumMi.toLocaleString()} tok  vs Gmail ${sumGm.toLocaleString()} tok  →  ${ratio(sumGm, sumMi)} less`);
+  console.log('committable table → bench/RESULTS-USECASES.md');
 }
 
 main().catch((e) => {

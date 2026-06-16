@@ -114,9 +114,16 @@ xychart-beta
 | Fixed schema tax (per turn) | ~1,367 tok (14 tools) | ~1,816 tok (18 tools) | −449 |
 
 mail-index pays a slightly higher *fixed* schema tax (more, recall-focused
-tools) and earns it back many times over on the **first question**. Full
-write-up in **[docs/COMPARISON.md](docs/COMPARISON.md)**; reproduce/extend the
-numbers with **[bench/](bench/README.md)** (`node bench/run.mjs`).
+tools) and earns it back many times over on the **first question**.
+
+Across a **[30 common-use-case suite](bench/RESULTS-USECASES.md)** (real mailbox),
+answering the questions an agent actually gets asked cost **19× fewer tokens**
+overall — 16× on "list all …" aggregations, ~10× on recall, and **227× on
+relational questions** ("who do I correspond with most", "what did I miss") that
+a query-based Gmail MCP has no way to answer except by scanning the whole mailbox.
+
+Full write-up in **[docs/COMPARISON.md](docs/COMPARISON.md)**; reproduce/extend
+the numbers with **[bench/](bench/README.md)** (`node bench/run.mjs`).
 
 ## Stack
 
