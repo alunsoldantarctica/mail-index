@@ -23,6 +23,60 @@
  * survives while quotes/sigs/footers go.
  */
 
+/**
+ * Invisible code points that pad body text but carry no prose meaning (soft
+ * hyphen, zero-width spaces/joiners, BOM, word joiner). These arrive via
+ * quoted-printable bytes (e.g. `=E2=80=8B` → U+200B) or HTML entities
+ * (`&shy;`, `&zwnj;`, `&#8203;`) and would otherwise inflate the distilled
+ * text. Mirrors {@link meaningfulTextLength}'s set so OCR/image-only detection
+ * and distillation agree on what counts as "no text". Stripped via numeric
+ * code points (not a literal regex char class) to satisfy the lint rules
+ * no-irregular-whitespace / no-misleading-character-class.
+ */
+const INVISIBLE_CODEPOINTS = new Set<number>([
+  0x00ad, // soft hyphen (&shy;)
+  0x034f, // combining grapheme joiner
+  0x200b, 0x200c, 0x200d, 0x200e, 0x200f, // zero-width space/joiners/marks (&zwnj; = 200c)
+  0x2060, // word joiner
+  0xfeff, // BOM / zero-width no-break space
+]);
+
+/** Drop invisible/zero-width code points (via numeric Set, never a literal
+ * regex char class — keeps eslint no-irregular-whitespace happy). */
+function stripInvisibles(s: string): string {
+  let out = '';
+  for (const ch of s) {
+    const cp = ch.codePointAt(0);
+    if (cp != null && INVISIBLE_CODEPOINTS.has(cp)) continue;
+    out += ch;
+  }
+  return out;
+}
+
+/**
+ * Decode quoted-printable transfer encoding (RFC 2045 §6.7) in a body string:
+ * remove soft line breaks (`=` at end of line) and decode `=XX` hex escapes.
+ * Runs of consecutive `=XX` are collected into a byte buffer and decoded as
+ * one UTF-8 sequence, so multibyte characters (e.g. `=E2=80=93` → "–") come
+ * back correctly rather than as three mojibake bytes. Bytes that don't form
+ * valid UTF-8 are left as their raw `=XX` token (conservative: never corrupts
+ * text that merely contains a stray `=`).
+ */
+export function decodeQuotedPrintable(s: string): string {
+  // Soft line breaks: an `=` immediately before CRLF/LF is a wrap artefact.
+  const t = s.replace(/=\r?\n/g, '');
+
+  const decoder = new TextDecoder('utf-8', { fatal: false });
+  // Match one or more consecutive =XX escapes and decode them together.
+  return t.replace(/(?:=[0-9A-Fa-f]{2})+/g, (run) => {
+    const bytes = new Uint8Array(run.length / 3);
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = parseInt(run.slice(i * 3 + 1, i * 3 + 3), 16);
+    }
+    return decoder.decode(bytes);
+  });
+}
+
 /** Strip HTML to plain text: remove script/style/head, drop tags, decode
  * entities, and turn block-level boundaries into line breaks. Deterministic and
  * dependency-free. */
@@ -61,6 +115,9 @@ const NAMED_ENTITIES: Record<string, string> = {
   middot: '·',
   bull: '•',
   nbsp: ' ',
+  ensp: ' ',
+  emsp: ' ',
+  thinsp: ' ',
   mdash: '—',
   ndash: '–',
   hellip: '…',
@@ -68,14 +125,42 @@ const NAMED_ENTITIES: Record<string, string> = {
   lsquo: '‘',
   rdquo: '”',
   ldquo: '“',
+  sbquo: '‚',
+  bdquo: '„',
+  laquo: '«',
+  raquo: '»',
+  deg: '°',
+  euro: '€',
+  pound: '£',
+  cent: '¢',
+  yen: '¥',
+  sect: '§',
+  para: '¶',
+  dagger: '†',
+  Dagger: '‡',
+  permil: '‰',
+  prime: '′',
+  Prime: '″',
+  // Decode to invisible code points; {@link stripInvisibles} then removes them.
+  shy: '­', // soft hyphen
+  zwnj: '‌', // zero-width non-joiner
+  zwj: '‍', // zero-width joiner
+  lrm: '‎', // left-to-right mark
+  rlm: '‏', // right-to-left mark
 };
 
-/** Decode named + numeric HTML entities relevant to prose. */
+/**
+ * Decode named + numeric HTML entities relevant to prose, then drop any
+ * invisible code points the decode produced (e.g. `&shy;`, `&zwnj;`,
+ * `&#8203;`). Stripping happens here so a single decode pass cleans both the
+ * named and numeric forms of zero-width padding.
+ */
 function decodeEntities(s: string): string {
-  return s
+  const decoded = s
     .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => safeCodePoint(parseInt(hex, 16)))
     .replace(/&#(\d+);/g, (_, dec: string) => safeCodePoint(parseInt(dec, 10)))
     .replace(/&([a-z]+);/gi, (m, name: string) => NAMED_ENTITIES[name.toLowerCase()] ?? m);
+  return stripInvisibles(decoded);
 }
 
 function safeCodePoint(code: number): string {
@@ -182,12 +267,21 @@ export interface DistillInput {
  * text).
  */
 export function distill(input: DistillInput): string {
-  const source =
-    input.bodyText && input.bodyText.trim() !== ''
-      ? input.bodyText
-      : input.bodyHtml
-        ? htmlToText(input.bodyHtml)
-        : '';
+  let source: string;
+  if (input.bodyText && input.bodyText.trim() !== '') {
+    // Plain-text path: decode quoted-printable transfer encoding (soft breaks
+    // + `=XX`) and HTML entities that some providers leave embedded in the
+    // text/plain alternative, then strip invisibles. The HTML path runs entity
+    // decode + invisible stripping inside htmlToText already.
+    source = decodeEntities(decodeQuotedPrintable(input.bodyText));
+  } else if (input.bodyHtml) {
+    // Decode quoted-printable BEFORE HTML stripping so soft line breaks that
+    // split tags/words (`o=\n ur` → `our`) and multibyte `=XX` escapes are
+    // resolved before tags and entities are processed.
+    source = htmlToText(decodeQuotedPrintable(input.bodyHtml));
+  } else {
+    source = '';
+  }
 
   return normalizeWhitespace(deboilerplate(source));
 }
