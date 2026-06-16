@@ -1,0 +1,34 @@
+# mail-index
+
+> A local, agent-queryable mail intelligence layer. It indexes a mailbox
+> progressively (cheap metadata for everything, full bodies only where they earn
+> their place), builds a correspondence graph, infers interest, and exposes the
+> whole thing to AI agents through a local MCP server. Local-first (the index
+> never leaves the machine), read-only on the mailbox, and built for *recall*
+> (answering vague questions) rather than exact-query lookup.
+
+mail-index is a stdio MCP server (`mail-index-mcp`) plus a CLI (`mail-index`).
+Agents query a local SQLite + FTS5 index instead of hitting the mail provider:
+that is ~20–30× fewer tokens than a stock Gmail-API MCP (which streams raw
+message payloads into context) and answers questions a keyword query can't.
+TypeScript, `node:sqlite` (no native deps), Node 24+. The tool ships none of any
+user's data; accounts and the curated profile are private operator config.
+
+## Start here
+- [README](https://github.com/alunsoldantarctica/mail-index/blob/main/README.md): what it is, quick start, the Gmail-MCP comparison with charts
+- [Install guide](https://github.com/alunsoldantarctica/mail-index/blob/main/docs/INSTALL.md): install, authenticate a MailSource, init/sync/curate/enrich, add the MCP server (incl. desktop-app PATH gotchas)
+- [Agent setup](https://github.com/alunsoldantarctica/mail-index/blob/main/AGENTS.md): wiring the MCP into Claude Desktop / Claude Code / Codex / any MCP client, plus a usage primer for the agent
+
+## Reference
+- [MCP tool reference](https://github.com/alunsoldantarctica/mail-index/blob/main/docs/MCP.md): the 18 tools, args, compact result shapes, the `index_as_of` freshness + command-handback contracts
+- [Adapter contract](https://github.com/alunsoldantarctica/mail-index/blob/main/docs/ADAPTERS.md): the `MailSource` interface and how to write + contract-test a new provider adapter
+- [Architecture & plan](https://github.com/alunsoldantarctica/mail-index/blob/main/docs/PLAN.md): data model, layered architecture, the ADR digest, roadmap
+- [Decision records](https://github.com/alunsoldantarctica/mail-index/tree/main/docs/adr): ADR-0001 (O(1) inline enrich / command handbacks), 0002 (local-only), 0003 (summaries + demotion), 0004 (intelligence is the user's LLM), 0005 (freshness/background sync), 0006 (self-contained FTS5)
+
+## Why it's different
+- [Comparison vs a stock Gmail MCP](https://github.com/alunsoldantarctica/mail-index/blob/main/docs/COMPARISON.md): lookup vs recall, the token-cost write-up
+- [Benchmark harness](https://github.com/alunsoldantarctica/mail-index/blob/main/bench/README.md): reproduce the token + recall numbers (`node bench/run.mjs`, `node bench/accuracy.mjs`)
+- [Benchmark results](https://github.com/alunsoldantarctica/mail-index/blob/main/bench/RESULTS.md): recall × token matrix — a distilled Gmail query vs one mail-index phrase
+
+## Optional
+- [Security & privacy](https://github.com/alunsoldantarctica/mail-index/blob/main/SECURITY.md): local-first posture, treating the index as sensitive, vulnerability reporting
