@@ -59,9 +59,11 @@ Read-only — it never sends or mutates your mail.
 
 Requires **Node 24+** and a Gmail `MailSource` adapter — **`gog`** (recommended)
 or **`gws`**. Reading Gmail needs a Google OAuth client, and you get one **two
-ways**: use the **mail-index beta client** (skip Google Cloud entirely; ~100-user
-beta cap) or **bring your own** Google Cloud client (no cap — we walk you through
-it). See [docs/INSTALL.md §2](docs/INSTALL.md#2-connect-a-mailbox-pick-an-oauth-path)
+ways**: use the **mail-index beta client** (skip Google Cloud entirely;
+[request access](https://github.com/alunsoldantarctica/mail-index/issues/new?template=beta_access.yml)
+to join the ~100-user test list) or **bring your own** Google Cloud client (no
+cap, no request — we walk you through it). See
+[docs/INSTALL.md §2](docs/INSTALL.md#2-connect-a-mailbox-pick-an-oauth-path)
 and [docs/oauth-and-verification.md](docs/oauth-and-verification.md).
 
 ```sh

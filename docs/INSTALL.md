@@ -66,17 +66,23 @@ authenticated against your mailbox with **read-only** Gmail scope
 | Google Cloud setup | **None** | ~15 min in the GCP console (we walk you through it) |
 | Who signs the app | mail-index | you |
 | User limit | **~100 users** (beta, "unverified app" screen) | none (it's your own app) |
-| Best for | trying it fast, individuals | teams, Workspace orgs, going past the beta cap |
+| Best for | trying it fast, individuals (after a one-time access request) | teams, Workspace orgs, going past the beta cap |
 
 > **Why the ~100 cap on Option A?** `gmail.readonly` is a Google *restricted*
 > scope. Until the mail-index app finishes Google verification + a CASA security
-> audit it stays in "testing" mode, which Google caps at ~100 users. Option B
-> uses *your* client, so the cap is yours to lift (or ignore). Full detail:
+> audit it stays in "testing" mode, which Google caps at ~100 users — and Google
+> only lets **named test users** through that screen. So Option A needs a one-time
+> request to add your address to the list (below). Option B uses *your* client,
+> so the cap is yours to lift (or ignore). Full detail:
 > [docs/oauth-and-verification.md](oauth-and-verification.md).
 
 ### Option A — use the mail-index beta OAuth client (skip Google Cloud)
 
-The fastest path. The `mail-index setup` wizard installs the adapter, places the
+The fastest path once you're on the test-user list. **First, request access:** open a
+[**Beta access request**](https://github.com/alunsoldantarctica/mail-index/issues/new?template=beta_access.yml)
+with the Google address you'll sign in as — we add it to the mail-index app's
+test users (Google requires named testers while the app is in "testing" mode).
+Once we confirm, the `mail-index setup` wizard installs the adapter, places the
 **mail-index** OAuth client for you, and runs the browser sign-in — you never
 touch the Google Cloud console.
 
@@ -96,7 +102,10 @@ gog auth add you@gmail.com --services gmail --gmail-scope=readonly
 ```
 
 You'll see an "unverified app — mail-index" consent screen (expected during the
-beta); approve it to grant **read-only** Gmail access.
+beta); approve it to grant **read-only** Gmail access. If Google says
+**"access blocked"** or that you're *not a test user*, your address isn't on the
+list yet — [request access](https://github.com/alunsoldantarctica/mail-index/issues/new?template=beta_access.yml)
+(or use Option B).
 
 ### Option B — bring your own Google Cloud OAuth client (no caps)
 
