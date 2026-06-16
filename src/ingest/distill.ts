@@ -77,6 +77,26 @@ export function decodeQuotedPrintable(s: string): string {
   });
 }
 
+/**
+ * Does this body look quoted-printable? We only QP-decode when there's a strong
+ * signal, so a plain-text body that merely contains `=42` ("result=42") is never
+ * mangled into `resultB`. The hallmarks of real QP that don't occur in ordinary
+ * prose: a soft line break (`=` at end of line) or a run of >=2 consecutive
+ * `=XX` escapes (the shape of a QP-encoded multibyte char). The provider strips the
+ * `Content-Transfer-Encoding` header before we see the body, so this heuristic
+ * stands in for it — conservatively biased toward NOT decoding.
+ */
+export function looksQuotedPrintable(s: string): boolean {
+  // A soft line break, or a run of >=2 consecutive =XX (the shape of a
+  // QP-encoded multibyte char, e.g. =E2=80=93). A lone =42 matches neither.
+  return /=\r?\n/.test(s) || /(?:=[0-9A-Fa-f]{2}){2,}/.test(s);
+}
+
+/** QP-decode only when the body actually looks quoted-printable. */
+function maybeDecodeQuotedPrintable(s: string): string {
+  return looksQuotedPrintable(s) ? decodeQuotedPrintable(s) : s;
+}
+
 /** Strip HTML to plain text: remove script/style/head, drop tags, decode
  * entities, and turn block-level boundaries into line breaks. Deterministic and
  * dependency-free. */
@@ -170,6 +190,36 @@ function safeCodePoint(code: number): string {
   } catch {
     return '';
   }
+}
+
+/** Whether a decoded entity value is made up only of invisible code points. */
+function isAllInvisible(value: string): boolean {
+  if (value === '') return false;
+  for (const ch of value) {
+    const cp = ch.codePointAt(0);
+    if (cp == null || !INVISIBLE_CODEPOINTS.has(cp)) return false;
+  }
+  return true;
+}
+
+/**
+ * Remove ONLY invisible-padding entities (`&shy;`, `&zwnj;`, `&#8203;`, …) and
+ * raw invisible code points from a string, leaving every *visible* entity
+ * (`&amp;`, `&lt;`, `&#39;`, …) untouched. Used on the text/plain path: a genuine
+ * plain-text body must keep its literal `&amp;`/`<tag>` — those are content, not
+ * markup — but preview-text padding made of zero-width entities should still go.
+ */
+function stripPaddingEntities(s: string): string {
+  const decoded = s
+    .replace(/&#x([0-9a-f]+);/gi, (m, hex: string) =>
+      INVISIBLE_CODEPOINTS.has(parseInt(hex, 16)) ? '' : m,
+    )
+    .replace(/&#(\d+);/g, (m, dec: string) => (INVISIBLE_CODEPOINTS.has(parseInt(dec, 10)) ? '' : m))
+    .replace(/&([a-z]+);/gi, (m, name: string) => {
+      const value = NAMED_ENTITIES[name.toLowerCase()];
+      return value !== undefined && isAllInvisible(value) ? '' : m;
+    });
+  return stripInvisibles(decoded);
 }
 
 /**
@@ -269,16 +319,17 @@ export interface DistillInput {
 export function distill(input: DistillInput): string {
   let source: string;
   if (input.bodyText && input.bodyText.trim() !== '') {
-    // Plain-text path: decode quoted-printable transfer encoding (soft breaks
-    // + `=XX`) and HTML entities that some providers leave embedded in the
-    // text/plain alternative, then strip invisibles. The HTML path runs entity
-    // decode + invisible stripping inside htmlToText already.
-    source = decodeEntities(decodeQuotedPrintable(input.bodyText));
+    // Plain-text path: QP-decode ONLY when the body looks quoted-printable (so a
+    // literal `=42` survives), and strip ONLY invisible-padding entities — a real
+    // plain-text body's `&amp;`/`<tag>` are content and must stay literal. The
+    // HTML path below does full entity decoding inside htmlToText (entities are
+    // markup there).
+    source = stripPaddingEntities(maybeDecodeQuotedPrintable(input.bodyText));
   } else if (input.bodyHtml) {
-    // Decode quoted-printable BEFORE HTML stripping so soft line breaks that
-    // split tags/words (`o=\n ur` → `our`) and multibyte `=XX` escapes are
+    // QP-decode BEFORE HTML stripping (only when it looks QP) so soft line breaks
+    // that split tags/words (`o=\n ur` → `our`) and multibyte `=XX` escapes are
     // resolved before tags and entities are processed.
-    source = htmlToText(decodeQuotedPrintable(input.bodyHtml));
+    source = htmlToText(maybeDecodeQuotedPrintable(input.bodyHtml));
   } else {
     source = '';
   }

@@ -1,0 +1,20 @@
+# Keep the .mcpb bundle small. The server is launched via `npx -y -p mail-index
+# mail-index-mcp` (see manifest.json mcp_config), so the bundle does not need the
+# source, tests, dev toolchain, or node_modules — just the manifest + metadata.
+node_modules
+src
+test
+bench
+desktop
+docs
+.github
+.git
+.claude
+*.local.md
+*.test.*
+tsconfig.json
+eslint.config.*
+.gitignore
+.mcpbignore
+pnpm-lock.yaml
+*.mcpb

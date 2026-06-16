@@ -16,6 +16,7 @@ import {
   deboilerplate,
   normalizeWhitespace,
   decodeQuotedPrintable,
+  looksQuotedPrintable,
 } from '../dist/ingest/distill.js';
 
 /** A representative newsletter: mostly markup, tracking pixel, footer chrome. */
@@ -184,4 +185,24 @@ test('distill decodes HTML entities and strips zero-width padding (image-only in
   assert.ok(!out.includes('‌'), 'zero-width non-joiner (zwnj) gone');
   assert.ok(!out.includes('­'), 'soft hyphen (shy) gone');
   assert.equal(out, 'View this beautiful offer — Antarctica’s 2026 season…');
+});
+
+test('looksQuotedPrintable: lone =XX is not QP; soft break / multibyte run is', () => {
+  assert.equal(looksQuotedPrintable('Invoice total=42, code=CD'), false);
+  assert.equal(looksQuotedPrintable('a=b and c=d'), false);
+  assert.equal(looksQuotedPrintable('wrap=\nhere'), true);
+  assert.equal(looksQuotedPrintable('dash =E2=80=93 here'), true);
+});
+
+test('distill leaves a normal plain-text body untouched (no QP/entity mangling)', () => {
+  // Contains a lone =42 / =CD and literal visible entities — none must be rewritten.
+  const body = 'Invoice total=42 USD. Use Q&amp;A and <tag> literally; part=CD.';
+  assert.equal(distill({ bodyText: body, bodyHtml: null }), body);
+});
+
+test('distill strips invisible-padding entities from a plain-text body but keeps visible ones', () => {
+  // Silversea-style padding can also arrive in a text/plain alternative.
+  const body = 'Save&zwnj; &shy;up&#8203; to 40% &amp; more';
+  // &zwnj;/&shy;/&#8203; (invisible) removed; &amp; stays LITERAL (it's content here).
+  assert.equal(distill({ bodyText: body, bodyHtml: null }), 'Save up to 40% &amp; more');
 });

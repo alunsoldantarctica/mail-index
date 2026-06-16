@@ -12,7 +12,7 @@
  * Testability is the design constraint: all process/network effects flow through
  * an injected {@link SetupDeps} contract (`which`/`run`/`readBundledClient` plus
  * the existing `runInit`/`runSyncOne`). Production wires the real spawn seam
- * (src/cli/spawn.ts); tests inject fakes and assert the exact commands built,
+ * (src/cli/proc.ts); tests inject fakes and assert the exact commands built,
  * idempotency, and that the config is merged rather than overwritten — with no
  * process ever spawned. This module itself imports NO `node:child_process`; the
  * egress guard's PROC_ALLOW vouches only for proc.ts.

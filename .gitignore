@@ -36,3 +36,6 @@ build/
 
 # Internal milestone/PM planning (not public)
 docs/SCOPE.md
+
+# MCP bundle artifact (pack with `pnpm bundle`)
+*.mcpb
