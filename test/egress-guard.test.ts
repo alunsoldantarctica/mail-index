@@ -40,6 +40,7 @@ const PROC_ALLOW = new Set([
   'source/adapters/gws/runner.ts', // spawns the gws CLI — the provider boundary
   'source/adapters/gog/runner.ts', // spawns the gog CLI — the provider boundary
   'mcp/server.ts', // detached re-exec of our own `mail-index sync` (ADR-0005)
+  'cli/proc.ts', // onboarding: spawns gog/brew (mail-index setup) — the single auditable seam
 ]);
 
 function tsFiles(dir: string): string[] {

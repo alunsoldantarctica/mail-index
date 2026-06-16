@@ -22,6 +22,7 @@ import { SyncError } from '../ingest/sync.js';
 import { enrich, EnrichError, type EnrichSelector } from '../ingest/enrich.js';
 
 import { formatInit, runInit } from './init.js';
+import { defaultDeps, formatSetup, runSetup, SetupError, type SetupOptions } from './setup.js';
 import { buildSource, formatSyncResult, runSyncAll, runSyncOne, type SyncFlags } from './sync.js';
 import { formatResults, runSearchEnriching, type SearchFlags } from './search.js';
 import { formatShow, parseRef, runShow, RefError } from './show.js';
@@ -38,6 +39,7 @@ Usage:
 
 Commands:
   init                          Scaffold the operator config + data dir
+  setup   --account <email>     Onboard an account end-to-end (detect→auth→config→sync)
   sync    --account <label>     Sync message metadata for an account
   enrich  --account <label>     Fetch + distil bodies for selected messages (phase 2)
   curate  [--account <label>]   Interactive curation wizard (no-agent fallback; D14)
@@ -49,6 +51,28 @@ Commands:
   status                        Show per-account index freshness + counts
 
 Run 'mail-index <command> --help' for command-specific options.
+`;
+
+const SETUP_USAGE = `mail-index setup — idempotent onboarding for one account
+
+Usage:
+  mail-index setup --account <email> [--adapter gog|gws] [--client <path>]
+                   [--since <30d|1mo>] [--no-sync] [--json]
+
+Walks the full install path: detect (and, on macOS, install) the adapter CLI,
+configure a file keyring, place the bundled OAuth client, authenticate the
+mailbox (read-only — opens a browser once), merge the account into config.json
+without clobbering existing accounts, and run the first sync. Idempotent: a
+second run over an already-onboarded account is a no-op.
+
+Options:
+  --account <email>   The mailbox email to onboard (required)
+  --adapter <id>      Adapter to wire: gog (default) or gws
+  --client <path>     OAuth client JSON to place (overrides the bundled one)
+  --since <token>     Lower bound for the first sync (e.g. 30d, 1mo)
+  --no-sync           Configure only; skip the first sync
+  --json              Emit structured step records (agent/GUI mode); the browser
+                      auth step is surfaced as an action rather than blocking
 `;
 
 const SYNC_USAGE = `mail-index sync — phase-1 metadata sweep for an account
@@ -194,6 +218,53 @@ function cmdInit(): number {
   const result = runInit();
   process.stdout.write(formatInit(result));
   return 0;
+}
+
+async function cmdSetup(argv: string[]): Promise<number> {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      account: { type: 'string' },
+      adapter: { type: 'string' },
+      client: { type: 'string' },
+      since: { type: 'string' },
+      'no-sync': { type: 'boolean' },
+      json: { type: 'boolean' },
+      help: { type: 'boolean' },
+    },
+    allowPositionals: false,
+  });
+
+  if (values.help) {
+    process.stdout.write(SETUP_USAGE);
+    return 0;
+  }
+
+  if (!values.account) {
+    throw new CliError('setup requires --account <email>');
+  }
+  if (values.adapter != null && values.adapter !== 'gog' && values.adapter !== 'gws') {
+    throw new CliError(`--adapter must be "gog" or "gws", got "${values.adapter}"`);
+  }
+
+  const opts: SetupOptions = {
+    account: values.account,
+    ...(values.adapter ? { adapter: values.adapter as 'gog' | 'gws' } : {}),
+    ...(values.client ? { client: values.client } : {}),
+    ...(values.since ? { since: values.since } : {}),
+    ...(values['no-sync'] ? { noSync: true } : {}),
+    ...(values.json ? { json: true } : {}),
+  };
+
+  const result = await runSetup(opts, defaultDeps());
+  if (values.json) {
+    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  } else {
+    process.stdout.write(formatSetup(result));
+  }
+  // A run that still needs a human/agent action exits non-zero so a wrapping
+  // script can detect "not fully onboarded yet".
+  return result.steps.some((s) => s.status === 'action') ? 1 : 0;
 }
 
 async function cmdSync(argv: string[]): Promise<number> {
@@ -631,6 +702,8 @@ async function main(argv: string[]): Promise<number> {
   switch (command) {
     case 'init':
       return cmdInit();
+    case 'setup':
+      return cmdSetup(rest);
     case 'sync':
       return cmdSync(rest);
     case 'enrich':
@@ -665,6 +738,7 @@ main(process.argv.slice(2))
       err instanceof SyncError ||
       err instanceof EnrichError ||
       err instanceof CliError ||
+      err instanceof SetupError ||
       err instanceof RefError
     ) {
       process.stderr.write(`error: ${err.message}\n`);
