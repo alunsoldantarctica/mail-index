@@ -97,13 +97,7 @@ the cost to answer each (`node bench/run.mjs --suite inbox100`). Answering all
 100 cost **15.3× fewer tokens** overall — and the gap tracks exactly with how much
 *synthesis* a question needs:
 
-```mermaid
-xychart-beta
-    title "Token savings by category — 100 inbox questions (higher is better)"
-    x-axis ["Retrieval", "Logistics", "Scheduling", "Commitments", "Finance", "Account", "Relationship", "Summarize"]
-    y-axis "Savings (×, mail-index vs Gmail MCP)" 0 --> 35
-    bar [3.0, 4.9, 9.2, 9.6, 13.0, 20.3, 24.7, 32.8]
-```
+![Token savings by category across 100 inbox questions, mail-index vs a stock Gmail-API MCP: Retrieval 3.0×, Logistics 4.9×, Scheduling 9.2×, Commitments 9.6×, Finance 13.0×, Account 20.3×, Relationship 24.7×, Summarize 32.8× — 15.3× overall.](demo/savings-by-category.png)
 
 | Category (count) | mail-index | Gmail MCP | Savings |
 |---|--:|--:|--:|

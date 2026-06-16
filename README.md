@@ -101,14 +101,12 @@ suite on a real mailbox it answered every question for **15× fewer tokens** —
 the gap widens exactly where a query-based MCP has no primitive at all:
 summarizing, relationships, and commitments.
 
-```mermaid
-%%{init: {"xyChart": {"width": 1000, "height": 420}}}%%
-xychart-beta
-    title "Token savings by category — 100 inbox questions (higher is better)"
-    x-axis ["Retrieval", "Logistics", "Scheduling", "Commitments", "Finance", "Account", "Relationship", "Summarize"]
-    y-axis "Savings (×, mail-index vs Gmail MCP)" 0 --> 35
-    bar [3.0, 4.9, 9.2, 9.6, 13.0, 20.3, 24.7, 32.8]
-```
+<p align="center">
+  <a href="docs/COMPARISON.md">
+    <img src="docs/demo/savings-by-category.png" width="1000"
+         alt="Token savings by category across 100 inbox questions, mail-index vs a stock Gmail-API MCP: Retrieval 3.0×, Logistics 4.9×, Scheduling 9.2×, Commitments 9.6×, Finance 13.0×, Account 20.3×, Relationship 24.7×, Summarize 32.8× — 15.3× overall." />
+  </a>
+</p>
 
 Per-category tables, the read-one-message comparison, the tool-by-tool landscape,
 and how to reproduce it all → **[docs/COMPARISON.md](docs/COMPARISON.md)**.
