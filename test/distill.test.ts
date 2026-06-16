@@ -15,6 +15,7 @@ import {
   htmlToText,
   deboilerplate,
   normalizeWhitespace,
+  decodeQuotedPrintable,
 } from '../dist/ingest/distill.js';
 
 /** A representative newsletter: mostly markup, tracking pixel, footer chrome. */
@@ -138,4 +139,49 @@ test('normalizeWhitespace collapses blank-line runs and trims', () => {
 test('deboilerplate keeps content when there is no boilerplate', () => {
   const text = 'Line one.\nLine two.\nLine three.';
   assert.equal(deboilerplate(text), text);
+});
+
+test('decodeQuotedPrintable strips soft breaks and decodes multibyte =XX', () => {
+  // Soft line break splitting a word: "o=\n ur" → "o ur" (the `=` + newline go).
+  assert.equal(decodeQuotedPrintable('jo=\nin us'), 'join us');
+  // Multibyte UTF-8: en dash (=E2=80=93) and zero-width space (=E2=80=8B).
+  assert.equal(decodeQuotedPrintable('a =E2=80=93 b'), 'a – b');
+  assert.equal(decodeQuotedPrintable('x=E2=80=8By'), 'x​y');
+  // A stray `=` not part of a valid escape survives untouched.
+  assert.equal(decodeQuotedPrintable('2 = 2'), '2 = 2');
+});
+
+test('distill decodes a quoted-printable body and leaves no mojibake', () => {
+  // A real text/plain alternative as a provider hands it over, QP-encoded:
+  // soft breaks (=\n) wrapping long lines, a zero-width space (=E2=80=8B),
+  // an en dash (=E2=80=93), and a curly apostrophe (=E2=80=99).
+  const body =
+    'Hi Al,=E2=80=8B\n\n' +
+    'Your December departure is confirmed =E2=80=93 we=E2=80=99ll send the=\n' +
+    ' final manifest next week. Please confirm the dep=\nosit by Friday.\n';
+  const out = distill({ bodyText: body, bodyHtml: null });
+
+  assert.ok(!/=[0-9A-Fa-f]{2}/.test(out), 'no leftover =XX escapes');
+  assert.ok(!out.includes('=\n'), 'no leftover soft line breaks');
+  assert.ok(!out.includes('​'), 'zero-width space stripped');
+  assert.ok(out.includes('December departure is confirmed – we’ll'), 'en dash + apostrophe decoded');
+  assert.ok(out.includes('final manifest'), 'soft-wrapped word rejoined');
+  assert.ok(out.includes('deposit by Friday'), 'soft break inside a word rejoined');
+});
+
+test('distill decodes HTML entities and strips zero-width padding (image-only inflation)', () => {
+  // An entity-padded, image-only body (e.g. a Silversea offer where the prose
+  // lives in images and the text is just invisible padding around alt copy).
+  const html =
+    '<p>&zwnj;&zwnj;&shy;View this beautiful&#8203; offer&nbsp;&mdash;&nbsp;' +
+    'Antarctica&#x2019;s 2026 season&hellip;&#8203;&zwnj;</p>';
+  const out = distill({ bodyText: null, bodyHtml: html, mimeType: 'text/html' });
+
+  assert.ok(!/&[a-z]+;/i.test(out), 'no leftover named entities');
+  assert.ok(!/&#\d+;/.test(out), 'no leftover numeric entities');
+  assert.ok(!/&#x[0-9a-f]+;/i.test(out), 'no leftover hex entities');
+  assert.ok(!out.includes('​'), 'zero-width space gone');
+  assert.ok(!out.includes('‌'), 'zero-width non-joiner (zwnj) gone');
+  assert.ok(!out.includes('­'), 'soft hyphen (shy) gone');
+  assert.equal(out, 'View this beautiful offer — Antarctica’s 2026 season…');
 });
