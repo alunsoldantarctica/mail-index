@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "A local, agent-queryable mail intelligence layer — progressive mailbox index + MCP server for AI agents.",
   "type": "module",
+  "packageManager": "pnpm@10.28.2",
   "license": "MIT",
   "author": "Al Ste-Marie (https://unsold.group/al)",
   "homepage": "https://github.com/alunsoldantarctica/mail-index#readme",
