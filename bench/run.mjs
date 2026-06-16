@@ -158,11 +158,20 @@ const gmailGet = (id, format) =>
 // ---- the task suite (generic; queries derive real ids at runtime) ---------
 
 const TASKS = [
-  { label: 'recall: an invite or event', mi: { tool: 'search', args: { query: 'invite event', limit: 5 } }, gmailQ: 'invite OR event' },
-  { label: 'recall: a refund / payment', mi: { tool: 'search', args: { query: 'refund payment receipt', limit: 5 } }, gmailQ: 'refund OR receipt OR payment' },
-  { label: 'recall: a security/login alert', mi: { tool: 'search', args: { query: 'login security alert', limit: 5 } }, gmailQ: 'security alert OR login' },
-  { label: 'read the single most relevant message', mi: { tool: 'read-top', args: { query: 'invite event', limit: 1 } }, gmailQ: 'invite OR event', read: true },
+  // RECALL — find one message (Gmail: list + a few metadata gets to identify it).
+  { kind: 'recall', label: 'recall: an invite or event', mi: { tool: 'search', args: { query: 'invite event', limit: 5 } }, gmailQ: 'invite OR event' },
+  { kind: 'recall', label: 'recall: a refund / payment', mi: { tool: 'search', args: { query: 'refund payment receipt', limit: 5 } }, gmailQ: 'refund OR receipt OR payment' },
+  { kind: 'recall', label: 'recall: a security/login alert', mi: { tool: 'search', args: { query: 'login security alert', limit: 5 } }, gmailQ: 'security alert OR login' },
+  // READ — put one full message in context (Gmail: messages.get format=full).
+  { kind: 'read', label: 'read the single most relevant message', mi: { tool: 'read-top', args: { query: 'invite event', limit: 1 } }, gmailQ: 'invite OR event' },
+  // SCAN — answer an AGGREGATION over many messages. Gmail must fetch EVERY match
+  // to read it; mail-index returns the whole compact set in one ranked call.
+  { kind: 'scan', label: 'scan: all purchases / receipts (6mo)', mi: { tool: 'search', args: { query: 'receipt OR order OR invoice OR payment OR purchase OR dispatched OR refund', limit: 200 } }, gmailQ: 'receipt OR order OR invoice OR payment OR purchase OR dispatched OR refund newer_than:6m' },
+  { kind: 'scan', label: 'scan: every newsletter / digest (6mo)', mi: { tool: 'search', args: { query: 'newsletter OR digest OR weekly OR briefing OR unsubscribe', limit: 200 } }, gmailQ: 'unsubscribe OR newsletter OR digest newer_than:6m' },
+  { kind: 'scan', label: 'scan: all meetings / calendar invites (6mo)', mi: { tool: 'search', args: { query: 'invite OR meeting OR calendar OR scheduled OR rsvp', limit: 200 } }, gmailQ: 'invite OR meeting OR calendar OR rsvp newer_than:6m' },
 ];
+
+const SCAN_SAMPLE = 8; // real gets sampled per scan to derive avg cost, then extrapolate
 
 // ---- run ------------------------------------------------------------------
 
@@ -184,7 +193,7 @@ async function schemaTax(mcp) {
 }
 
 async function runTask(mcp, t) {
-  // mail-index side
+  // ---- mail-index side: one (or two, for a read) compact calls ----
   let miText = '';
   let miCalls = 0;
   if (t.mi.tool === 'read-top') {
@@ -204,29 +213,61 @@ async function runTask(mcp, t) {
     miText = toolResultText(r);
   }
   const miTok = await countTokens(miText);
+  const miHits = safeHitCount(miText);
 
-  // gmail side — real payloads
-  let gmailText = '';
-  let gmailCalls = 0;
-  const listRaw = await gmailList(t.gmailQ, 10);
-  gmailCalls++;
-  gmailText += listRaw;
-  const ids = (JSON.parse(listRaw).messages ?? []).map((m) => m.id);
-  if (t.read) {
-    if (ids[0]) {
-      gmailText += await gmailGet(ids[0], 'full');
-      gmailCalls++;
-    }
+  // ---- gmail side: real payloads ----
+  let gmailTok;
+  let gmailCalls;
+  let note = '';
+
+  if (t.kind === 'scan') {
+    // SCAN: to ANSWER the aggregation the agent must read EVERY match. Gmail
+    // list returns ids only, so cost = list + get×(matchN). We fetch a real
+    // sample to get avg get-cost, then extrapolate to the true match count
+    // (metadata format — generous to Gmail; full would be ~2.5× worse).
+    const listRaw = await gmailList(t.gmailQ, 200);
+    const ids = (JSON.parse(listRaw).messages ?? []).map((m) => m.id);
+    const matchN = ids.length;
+    const sampleIds = ids.slice(0, Math.min(SCAN_SAMPLE, matchN));
+    let sampleTok = 0;
+    for (const id of sampleIds) sampleTok += await countTokens(await gmailGet(id, 'metadata'));
+    const avgGet = sampleIds.length ? sampleTok / sampleIds.length : 0;
+    const listTok = await countTokens(listRaw);
+    gmailTok = Math.round(listTok + avgGet * matchN);
+    gmailCalls = 1 + matchN; // 1 list + one get per match
+    note = `${matchN} matches × ~${Math.round(avgGet)} tok/get (sampled ${sampleIds.length}, extrapolated)`;
   } else {
-    // identify the answer among hits: top-3 metadata gets (generous to Gmail)
-    for (const id of ids.slice(0, 3)) {
-      gmailText += await gmailGet(id, 'metadata');
-      gmailCalls++;
+    let gmailText = '';
+    gmailCalls = 0;
+    const listRaw = await gmailList(t.gmailQ, 10);
+    gmailCalls++;
+    gmailText += listRaw;
+    const ids = (JSON.parse(listRaw).messages ?? []).map((m) => m.id);
+    if (t.kind === 'read') {
+      if (ids[0]) {
+        gmailText += await gmailGet(ids[0], 'full');
+        gmailCalls++;
+      }
+    } else {
+      // recall: identify the answer among hits — top-3 metadata gets (generous).
+      for (const id of ids.slice(0, 3)) {
+        gmailText += await gmailGet(id, 'metadata');
+        gmailCalls++;
+      }
     }
+    gmailTok = await countTokens(gmailText);
   }
-  const gmailTok = await countTokens(gmailText);
 
-  return { label: t.label, miCalls, miTok, gmailCalls, gmailTok };
+  return { label: t.label, kind: t.kind, miCalls, miTok, miHits, gmailCalls, gmailTok, note };
+}
+
+function safeHitCount(text) {
+  try {
+    const o = JSON.parse(text);
+    return (o.hits ?? o.matches ?? o.results ?? []).length || null;
+  } catch {
+    return null;
+  }
 }
 
 function resolveConfigDir(account) {
@@ -288,8 +329,16 @@ async function main() {
     );
   lines.push(`| **TOTAL** | **${sumMi}** | **${sumGm}** | **${ratio(sumGm, sumMi)}** |`);
   lines.push('');
+  const scanNotes = rows.filter((r) => r.kind === 'scan' && r.note);
+  if (scanNotes.length) {
+    lines.push('Scan-task Gmail cost detail (linear in matches):');
+    for (const r of scanNotes) lines.push(`- ${r.label}: ${r.note}`);
+    lines.push('');
+  }
   lines.push(
-    '> Gmail model: list (ids only) + top-3 metadata gets per recall, 1 full get per read — generous to Gmail (real agents guess queries and fetch more).',
+    '> Gmail model: recall = list + top-3 metadata gets; read = 1 full get; ' +
+      'scan = list + one metadata get per MATCH (sampled avg × match count). ' +
+      'All generous to Gmail (metadata not full; real agents also guess queries and fetch more).',
   );
   const outPath = join(HERE, 'results.local.md');
   writeFileSync(outPath, lines.join('\n') + '\n');
@@ -302,6 +351,12 @@ async function main() {
       (tax.gmailTax != null ? `  vs Gmail ${tax.gmailTax} tok (${tax.gmailCount} tools)` : ''),
   );
   console.log(`per-task tax: mail-index ${sumMi} tok  vs Gmail ${sumGm} tok  →  ${ratio(sumGm, sumMi)} less`);
+  for (const r of rows.filter((x) => x.kind === 'scan')) {
+    console.log(
+      `  scan "${r.label.replace(/^scan: /, '')}": mail-index ${r.miTok} tok (1 call, ${r.miHits ?? '?'} hits)` +
+        `  vs Gmail ${r.gmailTok} tok (${r.gmailCalls} calls) → ${ratio(r.gmailTok, r.miTok)} less`,
+    );
+  }
   console.log(`full table → ${outPath} (gitignored; may name real senders)`);
 }
 
