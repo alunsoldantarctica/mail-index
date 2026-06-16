@@ -1,0 +1,13 @@
+# gitleaks config — extends the default ruleset, with a narrow allowlist for
+# documentation placeholders that are not real secrets.
+title = "mail-index gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documentation placeholders (illustrative env-var values, not real secrets)"
+regexes = [
+  '''sk-\.\.\.''',          # historical `ANTHROPIC_API_KEY=sk-...` example in bench/README.md
+  '''YOUR_KEY''',
+]

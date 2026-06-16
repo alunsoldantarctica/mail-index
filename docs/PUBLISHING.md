@@ -88,9 +88,31 @@ and let you specify the exact launch command:
 [mcp.so](https://mcp.so), [Glama](https://glama.ai/mcp/servers). Use the
 `mail-index-mcp` command (global install) or `npx -y -p mail-index mail-index-mcp`.
 
+## Provenance (recommended over a local `npm publish`)
+
+For a verifiable supply chain, publish from CI with **npm provenance** rather
+than from your laptop. The repo ships
+[`.github/workflows/release.yml`](../.github/workflows/release.yml): pushing a
+`vX.Y.Z` tag builds, tests, and runs `npm publish --provenance --access public`
+with GitHub OIDC, producing a signed attestation that links the published
+tarball to this repo and the exact workflow run. Consumers verify with:
+
+```sh
+npm audit signatures
+```
+
+One-time setup: add an **`NPM_TOKEN`** (automation token) repo secret. Then:
+
+```sh
+# bump version in BOTH package.json and server.json first, commit, then:
+git tag v1.0.0 && git push origin v1.0.0     # → triggers the release workflow
+```
+
+A local `npm publish` (Step 1 above) still works but produces **no** provenance —
+prefer the tagged CI release for anything public.
+
 ## Releasing new versions
 
-Bump `version` in **both** `package.json` and `server.json`, `npm publish`, then
-`mcp-publisher publish server.json`. Consider the
-[publish-mcp GitHub Action](https://github.com/modelcontextprotocol/registry/blob/main/docs/guides/publishing/github-actions.md)
-to automate step 2 on tag.
+Bump `version` in **both** `package.json` and `server.json`, push a `vX.Y.Z` tag
+(CI publishes to npm with provenance), then `mcp-publisher publish server.json`
+to update the registry entry.

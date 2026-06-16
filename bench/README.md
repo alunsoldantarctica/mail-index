@@ -32,7 +32,7 @@ pnpm run build                      # ensure dist/ is current
 node bench/run.mjs                  # defaults: --account personal
 node bench/run.mjs --account unsold-group
 # exact Claude token counts:
-ANTHROPIC_API_KEY=sk-... node bench/run.mjs
+ANTHROPIC_API_KEY=YOUR_KEY node bench/run.mjs
 # point at a LIVE Gmail MCP's tools/list for an exact schema-tax line:
 node bench/run.mjs --gmail-tools /path/to/that-servers-tools.json
 # the 100 inbox-question suite (8 research-backed categories):

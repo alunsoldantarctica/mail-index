@@ -30,12 +30,54 @@ mailbox. Its design reflects that.
   layer on; it is not bundled (it would add a native dependency).
 - Never commit the DB, your operator `config.json`, or `*.local.md` files.
 
-## Credentials
+## Credentials & least privilege
 
 OAuth tokens and client secrets are the **adapter's** concern and live in the
 provider tool's own store (for the gws adapter, its per-account config dir) —
 never in this repo and never in the index DB. Never paste tokens into issues
 or PRs.
+
+Because mail-index only ever **reads**, grant the adapter a **read-only**
+provider scope. For Gmail that's
+`https://www.googleapis.com/auth/gmail.readonly` — sufficient for everything the
+tool does, and it makes "this can't modify my mail" true at the token level, not
+just by convention.
+
+## Don't trust us — verify
+
+Every claim here is checkable. The whole posture is also kept honest in CI: the
+egress guard ([`test/egress-guard.test.ts`](test/egress-guard.test.ts)) fails the
+build if any network primitive appears in `src/`, a dependency audit + a gitleaks
+secret scan run on every push ([`.github/workflows/security.yml`](.github/workflows/security.yml)),
+and installs use `--ignore-scripts` (no dependency postinstall runs).
+
+To confirm it yourself:
+
+```sh
+# 1. It doesn't phone home. Watch egress while you sync — you should see traffic
+#    ONLY to the provider (Google), nothing else. (macOS: Little Snitch / lsof;
+#    Linux: ss/tcpdump.)
+sudo lsof -i -nP -p "$(pgrep -f mail-index | head -1)"     # while a sync runs
+
+# 2. No network calls in the tool's own code (the egress guard, run directly):
+node --test test/egress-guard.test.ts
+
+# 3. Tiny, auditable, script-free supply chain:
+cat package.json | grep -A6 '"dependencies"'   # 4 pure-JS packages
+pnpm audit --prod --audit-level high            # no known vulnerabilities
+pnpm install --ignore-scripts                   # nothing needs a postinstall
+
+# 4. Read-only: the MCP server exposes no send/label/delete tools — list them:
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"x","version":"1"}}}
+{"jsonrpc":"2.0","method":"notifications/initialized"}
+{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | mail-index-mcp | grep -o '"name":"[a-z_]*"'
+
+# 5. Released with provenance — verify the npm artifact came from this repo + CI:
+npm audit signatures
+```
+
+The full trust boundaries, prompt-injection stance, and non-goals are in
+**[docs/THREAT-MODEL.md](docs/THREAT-MODEL.md)**.
 
 ## Reporting a vulnerability
 

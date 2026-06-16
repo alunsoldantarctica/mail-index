@@ -251,6 +251,10 @@ mail-index status  [--json]              Per-account freshness + counts
   write + contract-test a new adapter.
 - **[docs/PLAN.md](docs/PLAN.md)** — architecture, data model, and the key
   decisions (ADR digest).
+- **[SECURITY.md](SECURITY.md)** + **[docs/THREAT-MODEL.md](docs/THREAT-MODEL.md)**
+  — privacy posture, trust boundaries, prompt-injection stance, and a
+  "verify our claims yourself" runbook. The local-only promise is enforced in CI
+  by an [egress guard test](test/egress-guard.test.ts).
 
 ## About
 
