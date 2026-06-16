@@ -60,6 +60,31 @@ per-task result tokens **2,136 (mail-index) vs 48,630 (Gmail API) — 22.8× les
 (recall tasks ~9–11×; reading one full message 80×+). Reproduce / extend the
 suite yourself; numbers scale with mailbox content.
 
+## Accuracy: a smarter query doesn't save Gmail
+
+Tokens aside — *can* a stock Gmail MCP even answer "list my purchases over 6
+months" accurately? [`bench/accuracy.mjs`](../bench/README.md) runs a matrix of
+Gmail query variants (simple → keyword → distilled → broad), scoring each on
+**recall** (against a transaction-sender reference set) and **tokens to answer**,
+versus one mail-index phrase. Full table: [`bench/RESULTS.md`](../bench/RESULTS.md).
+
+Two results:
+
+- **You can't reliably distill a better query up front.** A hand-tuned
+  "distilled" query (phrase matches, `-unsubscribe`) scored *lower* recall than
+  naive keywords — its precision constraints excluded real transactions. The
+  agent is guessing terms blind, with no corpus to check against.
+- **Recall and tokens rise together.** Gmail's only lever for higher recall is a
+  broader query — which means reading more messages, and you *must* read them
+  (a stock-trade "order filled" is not a purchase; only the body disambiguates).
+  Accuracy is bought with tokens.
+
+A single mail-index phrase returns a scannable, snippet-first candidate set in
+one call (~20–25× fewer tokens), with recall comparable to a broad Gmail query —
+and the remaining gap closes **for free**: mail-index retrieves by sender and
+category (structure a keyword query can't touch) and iterates locally. On Gmail
+accuracy costs tokens; on mail-index it costs structure.
+
 ## Why it's also faster (wall-clock, not just tokens)
 
 - **No network on the hot path.** Recall hits a local SQLite index; a stock Gmail

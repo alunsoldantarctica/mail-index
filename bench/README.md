@@ -42,9 +42,32 @@ Output:
 - **`bench/results.local.md`** — the full per-task table. Gitignored
   (`*.local.md`) because token counts are derived from your real mailbox.
 
+## Accuracy: can a smarter query save Gmail? (`accuracy.mjs`)
+
+`run.mjs` measures tokens. `accuracy.mjs` measures whether a **distilled** Gmail
+query can answer *"list my purchases over 6 months"* accurately at all — running
+a matrix of Gmail query variants (simple → keyword → distilled → broad) and
+scoring each on **recall** (vs a transaction-sender reference set) *and* **tokens
+to answer** (you must read every match to verify it), versus a single mail-index
+phrase.
+
+```sh
+node bench/accuracy.mjs --account personal
+```
+
+Two findings fall out (see [RESULTS.md](RESULTS.md)): hand-distilling the query
+is unreliable (precision constraints can *lower* recall — you're guessing blind),
+and on Gmail recall and token cost rise together, so accuracy is bought with
+tokens. mail-index returns a scannable snippet set in one call (~20–25× fewer
+tokens) and closes the recall gap for free via sender/category structure.
+Aggregate table → [`RESULTS.md`](RESULTS.md) (committed, no PII); the missed-
+message detail → `results-accuracy.local.md` (gitignored).
+
 ## Files
 
-- `run.mjs` — the harness (mail-index MCP over stdio vs Gmail API via `gws`).
+- `run.mjs` — token harness (mail-index MCP over stdio vs Gmail API via `gws`).
+- `accuracy.mjs` — recall × token matrix (query distillation vs one mail-index phrase).
+- `RESULTS.md` — committed aggregate recall/token table (regenerate with `accuracy.mjs`).
 - `gmail-mcp-tools.json` — a representative stock Gmail MCP tool surface, used
   only for the fixed schema-tax line. Swap in a live server's `tools/list` via
   `--gmail-tools` for an exact figure. Not affiliated with any project.
