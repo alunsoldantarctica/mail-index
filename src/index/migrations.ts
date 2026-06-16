@@ -220,11 +220,32 @@ const m003_account_identity: Migration = {
   },
 };
 
+/**
+ * Migration 4 — OCR-candidate images (agent-OCR design).
+ *
+ * Marketing email increasingly puts the offer/price/deadline inside *images*,
+ * so the distilled `body_text` is near-empty. mail-index never OCRs (that would
+ * need a vision model + network); instead it deterministically picks which
+ * images plausibly carry readable content (see `intelligence/images.ts`) and
+ * stores those candidate URLs here, computed at enrich time. The MCP server then
+ * hands them to the local agent — which has vision — to read. A pure column add;
+ * `ocr_images_json` holds a compact JSON array (`[{src,width,height,alt,score,
+ * reason}]`) or NULL when the body carries no content-bearing images.
+ */
+const m004_ocr_images: Migration = {
+  version: 4,
+  name: 'ocr candidate images',
+  up: (db) => {
+    db.exec(`ALTER TABLE messages ADD COLUMN ocr_images_json TEXT;`);
+  },
+};
+
 /** All migrations, in ascending version order. Append-only. */
 export const MIGRATIONS: readonly Migration[] = [
   m001_initial,
   m002_thread_summary,
   m003_account_identity,
+  m004_ocr_images,
 ];
 
 /** Read the database's applied schema version (SQLite `user_version`). */

@@ -148,6 +148,23 @@ ladder.
 Returns a full message detail incl. `bodyState`, `summary`, `body` (only at
 `level: "body"`), `enriched`, and `index_as_of`.
 
+**Offers in images — `ocr_images` + `needs_ocr`.** Marketing email often puts the
+offer/price/deadline inside an image, leaving the distilled text near-empty.
+mail-index **never OCRs** (that would need a vision model + network, breaking the
+local-first contract). Instead, at enrich time it deterministically picks which
+images plausibly carry readable content — dropping tracking pixels, spacers,
+dividers, logos, and icons (see `intelligence/images.ts`) — and returns them on
+`get_message`:
+
+- `ocr_images`: ranked array of `{ src, width, height, alt, score, reason }` —
+  the content-bearing images (URLs only; mail-index does not fetch them).
+- `needs_ocr`: deterministic boolean — `true` when the meaningful body text is
+  thin **and** content images exist, i.e. the offer is in the images, not the
+  text. This is the "when needed" trigger.
+
+When `needs_ocr` is true, the **agent** (which has vision) reads `ocr_images` —
+e.g. fetch and view them — to recover the offer. mail-index stays zero-network.
+
 #### `get_thread`
 A thread by `<account:thread-id>`: metadata, its messages (compact hits), and
 the thread summary if present.

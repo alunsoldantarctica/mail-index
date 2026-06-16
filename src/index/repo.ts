@@ -62,6 +62,13 @@ export interface MessageInput {
   /** Distilled body text; only meaningful for 'full'. */
   bodyText?: string | null;
   gmailUrl?: string | null;
+  /**
+   * JSON array of deterministic OCR-candidate images (the offer may live in an
+   * image, not text — see `intelligence/images.ts`). Computed at enrich time.
+   * `undefined`/`null` on a meta sync leaves any existing value intact (the
+   * upsert COALESCEs it), so a phase-1 re-sync never wipes candidates.
+   */
+  ocrImagesJson?: string | null;
 }
 
 /** A persisted message row (subset used by callers/tests). */
@@ -88,6 +95,8 @@ export interface MessageRow {
   internal_date: number | null;
   indexed_at: string | null;
   body_fetched_at: string | null;
+  /** JSON array of OCR-candidate images, or null. See {@link MessageInput.ocrImagesJson}. */
+  ocr_images_json: string | null;
 }
 
 export interface SyncRunStart {
@@ -582,9 +591,10 @@ export class Repo {
          account, gmail_message_id, thread_id, internal_date, date_header,
          from_addr, to_addr, cc_addr, subject, labels_json, category,
          is_list, direction, unread, starred, important, size_estimate,
-         snippet, body_state, body_text, gmail_url, indexed_at, body_fetched_at
+         snippet, body_state, body_text, gmail_url, indexed_at, body_fetched_at,
+         ocr_images_json
        ) VALUES (
-         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
        )
        ON CONFLICT(account, gmail_message_id) DO UPDATE SET
          thread_id       = excluded.thread_id,
@@ -607,7 +617,9 @@ export class Repo {
          body_text       = excluded.body_text,
          gmail_url       = excluded.gmail_url,
          indexed_at      = excluded.indexed_at,
-         body_fetched_at = excluded.body_fetched_at`,
+         body_fetched_at = excluded.body_fetched_at,
+         -- keep existing candidates when an incoming meta sync supplies none
+         ocr_images_json = COALESCE(excluded.ocr_images_json, messages.ocr_images_json)`,
     ).run(
       input.account,
       input.gmailMessageId,
@@ -632,6 +644,7 @@ export class Repo {
       input.gmailUrl ?? null,
       resolved.now,
       resolved.bodyFetchedAt,
+      input.ocrImagesJson ?? null,
     );
 
     if (resolved.existingRowid != null) return resolved.existingRowid;
@@ -677,7 +690,7 @@ export class Repo {
               cc_addr, snippet, body_state, body_text, summary_text,
               summary_is_model, summarized_at, is_list, direction,
               unread, starred, important, category, internal_date, indexed_at,
-              body_fetched_at
+              body_fetched_at, ocr_images_json
          FROM messages WHERE account = ? AND gmail_message_id = ?`,
     ).get(account, gmailMessageId) as MessageRow | undefined;
   }
@@ -707,7 +720,8 @@ export class Repo {
               m.to_addr, m.cc_addr, m.snippet, m.body_state, m.body_text,
               m.summary_text, m.summary_is_model, m.summarized_at,
               m.is_list, m.direction, m.unread, m.starred, m.important,
-              m.category, m.internal_date, m.indexed_at, m.body_fetched_at
+              m.category, m.internal_date, m.indexed_at, m.body_fetched_at,
+              m.ocr_images_json
          FROM messages_fts f
          JOIN messages m ON m.rowid = f.rowid
         WHERE messages_fts MATCH ? ${accountClause}

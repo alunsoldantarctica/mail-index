@@ -47,6 +47,7 @@ import type { MailSource } from '../source/index.js';
 import type { Curation } from '../index/schema.js';
 import { CURATIONS } from '../index/schema.js';
 import { enrichOne } from '../ingest/enrich.js';
+import { isLikelyImageOnly } from '../intelligence/images.js';
 import { buildFtsQuery } from '../cli/search.js';
 import { propose, set as curationSet, get as curationGet } from '../curation/index.js';
 import {
@@ -375,6 +376,12 @@ export async function getMessage(ctx: ToolContext, args: GetMessageArgs): Promis
   }
 
   const body = level === 'body' && row.body_state === 'full' ? row.body_text : null;
+  // OCR candidates: images the offer/content may live in (mail-index never OCRs
+  // — the agent reads them). `needsOcr` is the deterministic "when needed"
+  // signal: the distilled body is thin yet content-bearing images exist, so the
+  // meaning is in the images, not the text.
+  const ocrImages = parseOcrImages(row.ocr_images_json);
+  const needsOcr = isLikelyImageOnly(row.body_text, ocrImages.length);
   return withMeta(ctx.repo, account, {
     ref: messageRef(row),
     account: row.account,
@@ -394,8 +401,25 @@ export async function getMessage(ctx: ToolContext, args: GetMessageArgs): Promis
     summary: row.summary_text,
     body,
     snippet: compactSnippet(row.snippet),
+    ocrImages,
+    needsOcr,
     enriched,
   });
+}
+
+/**
+ * Parse a stored `ocr_images_json` into a plain array (or `[]` on absent/bad
+ * JSON). Surfaced on `get_message` so the agent can fetch + read these images
+ * when the offer lives in a graphic rather than text.
+ */
+function parseOcrImages(json: string | null): unknown[] {
+  if (!json) return [];
+  try {
+    const v: unknown = JSON.parse(json);
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
 }
 
 export interface GetThreadArgs {
