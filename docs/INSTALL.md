@@ -67,25 +67,32 @@ authenticated against your mailbox with **read-only** Gmail scope
 | Google Cloud setup | **None** | ~15 min in the GCP console (we walk you through it) |
 | Who signs the app | mail-index | you |
 | User limit | **~100 users** (beta, "unverified app" screen) | none (it's your own app) |
-| Best for | trying it fast, individuals | teams, Workspace orgs, going past the beta cap |
+| Best for | trying it fast, individuals (after a one-time access request) | teams, Workspace orgs, going past the beta cap |
 
 > **Why the ~100 cap on Option A?** `gmail.readonly` is a Google *restricted*
 > scope. Until the mail-index app finishes Google verification + a CASA security
-> audit it stays in "testing" mode, which Google caps at ~100 users. Option B
-> uses *your* client, so the cap is yours to lift (or ignore). Full detail:
+> audit it stays in "testing" mode, which Google caps at ~100 users — and Google
+> only lets **named test users** through that screen. So Option A needs a one-time
+> request to add your address to the list (below). Option B uses *your* client,
+> so the cap is yours to lift (or ignore). Full detail:
 > [docs/oauth-and-verification.md](oauth-and-verification.md).
 
 ### Option A — use the mail-index beta OAuth client (skip Google Cloud) — *planned*
 
-The intended fastest path: a `mail-index setup` wizard installs the adapter,
-places the **mail-index** OAuth client for you, and runs the browser sign-in — no
-Google Cloud console. The OAuth app is registered (Testing mode, ~100-user cap),
-but **the wizard that places it for you is not built yet**, so today use
-**Option B** (your own client — it's the same end state, just one console visit).
-When the wizard ships it will, per mailbox: install gog, pipe in the bundled
-client (`gog auth credentials set -`), and run
-`gog auth add you@gmail.com --services gmail --gmail-scope=readonly` (you'll
-approve an "unverified app — mail-index" read-only consent screen).
+The intended fastest path. **First, request access:** open a
+[**Beta access request**](https://github.com/alunsoldantarctica/mail-index/issues/new?template=beta_access.yml)
+with the Google address you'll sign in as — we add it to the mail-index app's
+test users (Google requires named testers while the app is in "testing" mode).
+Once you're on the list, a `mail-index setup` wizard will install the adapter,
+place the **mail-index** OAuth client, and run the browser sign-in — no Google
+Cloud console.
+
+**The `setup` wizard isn't built yet**, so today use **Option B** (your own
+client — same end state, just one console visit). When it ships it will, per
+mailbox: install gog, pipe in the bundled client (`gog auth credentials set -`),
+then `gog auth add you@gmail.com --services gmail --gmail-scope=readonly` (you
+approve the "unverified app — mail-index" read-only consent screen; an
+`access blocked / not a test user` error means your address isn't on the list yet).
 
 ### Option B — bring your own Google Cloud OAuth client (no caps)
 

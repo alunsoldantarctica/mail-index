@@ -79,14 +79,11 @@ environment variables via `setx GOG_KEYRING_BACKEND file` etc.)
 ## Step 2 — Install mail-index
 
 ```sh
-# From source (current — npm package not yet published):
-git clone https://github.com/alunsoldantarctica/mail-index.git
-cd mail-index && pnpm install && pnpm build
-# invoke as `node dist/cli/index.js <command>`; symlink onto PATH if you want the bare `mail-index`.
-# Once published: `npm install -g mail-index` gives the `mail-index` + `mail-index-mcp` bins.
+npm install -g mail-index      # or: pnpm add -g mail-index
+# (dev/source: git clone the repo, `pnpm install && pnpm build`, use `node dist/cli/index.js`)
 ```
 
-**verify:** `node dist/cli/index.js --help` prints usage (or `mail-index --help` if you symlinked/installed).
+**verify:** `mail-index --help` prints usage, and `mail-index-mcp` resolves (`command -v mail-index-mcp`).
 
 ---
 
@@ -197,16 +194,17 @@ mail-index search "<a term you expect>" # returns ranked hits
 
 Register the stdio server with the user's MCP client.
 
-**Claude Code (agent-executable — preferred for this runbook):** one command, no file editing. Point it at the built server (use `npx -y -p mail-index mail-index-mcp` once the package is published).
+**Claude Code (agent-executable — preferred for this runbook):** one command, no file editing.
 ```sh
 claude mcp add --transport stdio \
   --env GOG_KEYRING_BACKEND=file \
   --env GOG_KEYRING_PASSWORD="$(cat ~/.config/mail-index/gog-keyring.pass)" \
-  mail-index -- node /abs/path/to/mail-index/dist/mcp/index.js
+  mail-index -- npx -y -p mail-index mail-index-mcp
 claude mcp list      # verify 'mail-index' is listed
 ```
 
-**Claude Desktop:** there is **no install URL/deep link** for MCP. A one-click `.mcpb` bundle is *planned* (not yet released); until then, configure it manually below.
+**Claude Desktop:** there is **no install URL/deep link** — the one-click path is the **`.mcpb` bundle** (download → double-click → Claude Desktop installs it). Offer the user the release link:
+`https://github.com/alunsoldantarctica/mail-index/releases/latest/download/mail-index.mcpb`
 
 **Manual config (any MCP client):** the MCP server spawns `gog`, so it needs the file-keyring vars from Step 1b in its `env` — desktop apps launch with a minimal environment and won't inherit your shell's, so set them explicitly:
 

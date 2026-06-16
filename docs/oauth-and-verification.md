@@ -4,11 +4,14 @@ mail-index reads Gmail through a Google **OAuth client** with the read-only
 scope `https://www.googleapis.com/auth/gmail.readonly`. You provide that client
 one of two ways (see [INSTALL.md §2](INSTALL.md#2-connect-a-mailbox-pick-an-oauth-path)):
 
-- **Option A — the mail-index beta client *(planned)*.** A public OAuth app is
-  registered (Google "testing" status), so eventually you'll just sign in. The
-  automated placement (the `setup` wizard / installer) isn't built yet — until
-  then use Option B. Because the app uses a *restricted* scope and is unverified,
-  it is capped at **~100 users** and shows an "unverified app" screen.
+- **Option A — the mail-index beta client *(placement not built yet)*.** A public
+  OAuth app is registered (Google "testing" status), so eventually you just sign
+  in — but the wizard/installer that places it for you isn't built yet, so use
+  Option B today. Because the app uses a *restricted* scope and is unverified, it
+  is capped at **~100 users** and shows an "unverified app" screen. Google only
+  admits **named test users** in this mode, so Option A needs a one-time
+  [beta access request](https://github.com/alunsoldantarctica/mail-index/issues/new?template=beta_access.yml)
+  to add your address to the test-user list.
 - **Option B — your own Google Cloud client.** No mail-index cap; the
   verification burden (if any) is yours, on your own app and timeline.
 

@@ -1,0 +1,49 @@
+name: 🔑 Request beta access (Option A OAuth client)
+description: Get your Google address added to the mail-index beta test-user list so you can use the bundled OAuth client.
+labels: [beta-access]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        **Option A** lets you skip Google Cloud entirely and sign in with the
+        **mail-index** OAuth client. Because `gmail.readonly` is a Google
+        *restricted* scope, that client is in Google's "testing" mode (capped at
+        ~100 users) until it finishes verification — so we add each requester's
+        Google address to the app's **test-user list** by hand. Drop yours below
+        and we'll add it, then you can run `mail-index setup`.
+
+
+        ⚠️ **This issue is public** — the address you enter will be visible. If
+        you'd rather not post an address publicly, use **Option B** (your own
+        Google Cloud client) instead — it needs no request and has no cap. See
+        [docs/INSTALL.md §2](https://github.com/alunsoldantarctica/mail-index/blob/main/docs/INSTALL.md#2-connect-a-mailbox-pick-an-oauth-path).
+  - type: input
+    id: google_email
+    attributes:
+      label: Google account address to add
+      description: The exact address you'll sign in as (the one `gog auth add` / the browser consent will use).
+      placeholder: you@gmail.com
+    validations:
+      required: true
+  - type: dropdown
+    id: mailbox_type
+    attributes:
+      label: Mailbox type
+      options:
+        - Personal Gmail
+        - Google Workspace
+        - Not sure
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else? (optional)
+      description: How you plan to use mail-index, which agent/MCP client, etc. Helps us prioritise.
+  - type: checkboxes
+    id: ack
+    attributes:
+      label: Acknowledgements
+      options:
+        - label: I understand mail-index only ever requests **read-only** Gmail access (`gmail.readonly`) and never sends or mutates my mail.
+          required: true
+        - label: I understand this is a beta client in Google's "testing" mode, and I'll see an "unverified app — mail-index" consent screen.
+          required: true
