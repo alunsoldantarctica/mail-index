@@ -45,6 +45,15 @@ See [docs/PLAN.md §2](docs/PLAN.md).
 5. **Query** — your agent searches, traverses the graph, and reads the messages
    that matter, all locally via MCP.
 
+## Why not just a Gmail MCP?
+
+Stock Gmail-API MCPs are query-based lookup tools: exact queries, a network
+round-trip per call, and raw message payloads streamed into context. mail-index
+answers *vague* questions from a local recall index — measurably lighter on
+tokens (~30× less to read a message; one ranked call instead of a list→get→get
+dance). See **[docs/COMPARISON.md](docs/COMPARISON.md)** and reproduce the
+numbers with **[bench/](bench/README.md)** (`node bench/run.mjs`).
+
 ## Stack
 
 TypeScript · `node:sqlite` (no native deps) · SQLite FTS5 · Graphology ·
