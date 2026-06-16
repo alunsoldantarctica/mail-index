@@ -127,3 +127,66 @@ accuracy costs tokens; on mail-index it costs structure.
 The point isn't that the Gmail API is bad — it's that an *agent* shouldn't pay
 context and latency to re-discover, re-fetch, and re-parse a mailbox on every
 question. That's what an index is for.
+
+## Where mail-index sits among comparable tools
+
+A scan of the surrounding ecosystem (June 2026) turns up three adjacent
+categories. None combines all three of mail-index's traits at once:
+**(a) email-specific, (b) a local persistent index, and (c) agent-facing recall
+rather than exact lookup.**
+
+**1. Gmail / email MCP servers — same category, opposite design.**
+The crowded bucket. Each wraps the *live* provider API and exposes actions to an
+agent; they are query-based and exact (a miss returns nothing), with no
+persistent local index and no cross-mailbox memory.
+
+- [GongRzhe/Gmail-MCP-Server](https://github.com/GongRzhe/Gmail-MCP-Server) — the
+  most popular; natural-language Gmail management in Claude Desktop, auto-auth.
+- [navbuildz/gmail-mcp-server](https://github.com/navbuildz/gmail-mcp-server) —
+  multi-account read/write/label/auto-unsubscribe.
+- [alexpekach/gmail-mcp-local](https://github.com/alexpekach/gmail-mcp-local) —
+  "local-first" only in the sense that the OAuth token stays in the OS keychain;
+  it still hits the live API on every call, with no local index.
+- [Email Agent MCP](https://mcpservers.org/servers/usejunior/email-agent-mcp),
+  [marlinjai/email-mcp](https://mcpservers.org/servers/marlinjai/email-mcp)
+  (Gmail/Outlook/iCloud/IMAP), the
+  [official Google Gmail MCP](https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server),
+  and commercial connectors (StackOne, Composio, Improvado).
+
+These are the tools the rest of this document benchmarks: lookup, not recall.
+
+**2. Local SQLite agent-memory engines — same plumbing, different domain.**
+FTS5 (often plus a vector index), local-first, MCP — but *generic* memory, not
+email. Architecturally the nearest neighbors.
+
+- [bozbuilds/AIngram](https://github.com/bozbuilds/AIngram) — one SQLite file,
+  sqlite-vec + FTS5 + knowledge graph, MCP. The closest architectural twin.
+- [sqliteai/sqlite-memory](https://github.com/sqliteai/sqlite-memory),
+  [memweave](https://towardsdatascience.com/memweave-zero-infra-ai-agent-memory-with-markdown-and-sqlite-no-vector-database-required/),
+  [engram](https://github.com/nanoflow-io/engram) — hybrid keyword + semantic
+  recall over a local store.
+- [Nylas "Email as Memory for AI Agents"](https://cli.nylas.com/guides/email-as-memory-for-ai-agents)
+  — the closest *conceptual* match (email framed as agent memory), but
+  cloud-API-backed, not a local index.
+
+**3. AI email clients — overlapping promise, opposite shape.**
+[Shortwave](https://www.shortwave.com/), Superhuman, Missive, and Fyxer sell
+nearly mail-index's pitch — "find what we agreed with Acme about pricing,"
+contextual recall before replying — but as closed end-user GUI products with
+their own backend. None exposes an agent-facing local index for *your own*
+agents to query.
+
+**Takeaway.** The MCP bucket has email but is live/exact; the memory bucket is
+local/recall but domain-generic; the clients have recall but are closed GUIs.
+mail-index is the intersection: an email-specific, local, recall-first index
+that an agent — any MCP client, not one vendor's app — queries directly.
+AIngram (architecture) and Nylas's "email as memory" framing (concept) are the
+two to watch as the gap narrows.
+
+> **Know a tool we missed?** This landscape is meant to stay current, not to
+> flatter mail-index. If you build or use a comparable tool — Gmail/email MCP,
+> local agent-memory engine, AI email client, or something none of these
+> buckets capture — please
+> [open an issue](https://github.com/alunsoldantarctica/mail-index/issues/new?title=Comparison%3A%20add%20%3Ctool%3E&body=Tool%3A%0AURL%3A%0ACategory%20%28Gmail%2Femail%20MCP%20%2F%20local%20agent-memory%20%2F%20AI%20email%20client%20%2F%20other%29%3A%0AWhat%20it%20does%20%2F%20how%20it%20compares%3A%0AEmail-specific%3F%20Local%20index%3F%20Agent-facing%20recall%3F%3A)
+> or a PR adding it here. Corrections to how an existing tool is described are
+> just as welcome.

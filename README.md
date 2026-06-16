@@ -156,6 +156,30 @@ Full write-up in **[docs/COMPARISON.md](docs/COMPARISON.md)** · table in
 **[bench/RESULTS-USECASES.md](bench/RESULTS-USECASES.md)** · reproduce with
 **[bench/](bench/README.md)** (`node bench/run.mjs`).
 
+### How it compares to other tools
+
+A scan of the ecosystem (June 2026) finds three adjacent categories, none of
+which is what mail-index is:
+
+- **Gmail/email MCP servers** (GongRzhe, navbuildz, gmail-mcp-local, the official
+  Google MCP, StackOne/Composio) — email, but live-API *lookup*: exact queries,
+  a round-trip per call, no local index or mailbox memory.
+- **Local SQLite agent-memory engines** (AIngram, sqlite-memory, memweave,
+  engram) — same FTS5/vector + MCP plumbing and local-first recall, but *generic*
+  memory, not email-aware.
+- **AI email clients** (Shortwave, Superhuman, Missive, Fyxer) — the same recall
+  pitch, but closed end-user GUIs with their own backend, not something your own
+  agents can query.
+
+mail-index is the intersection the others miss: **email-specific + local
+persistent index + agent-facing recall** (any MCP client, not one vendor's app).
+Full landscape with links →
+**[docs/COMPARISON.md#where-mail-index-sits-among-comparable-tools](docs/COMPARISON.md#where-mail-index-sits-among-comparable-tools)**.
+
+**Know a tool we missed?** This landscape is meant to stay current, not to
+flatter mail-index — [open an issue](https://github.com/alunsoldantarctica/mail-index/issues/new?title=Comparison%3A%20add%20%3Ctool%3E&body=Tool%3A%0AURL%3A%0ACategory%20%28Gmail%2Femail%20MCP%20%2F%20local%20agent-memory%20%2F%20AI%20email%20client%20%2F%20other%29%3A%0AWhat%20it%20does%20%2F%20how%20it%20compares%3A%0AEmail-specific%3F%20Local%20index%3F%20Agent-facing%20recall%3F%3A)
+or PR to add a comparable tool (or correct how one is described).
+
 ## Stack
 
 TypeScript · `node:sqlite` (no native deps) · SQLite FTS5 · Graphology ·
