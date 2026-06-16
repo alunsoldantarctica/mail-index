@@ -1,0 +1,25 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.alunsoldantarctica/mail-index",
+  "title": "mail-index",
+  "description": "Local, agent-queryable mail intelligence — a progressive mailbox index exposed as a read-only MCP server. Recall over your email (search, contacts, threads, graph, digests) at a fraction of a Gmail-API MCP's tokens. Local-first; never mutates the mailbox.",
+  "repository": {
+    "url": "https://github.com/alunsoldantarctica/mail-index",
+    "source": "github"
+  },
+  "version": "1.0.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "mail-index",
+      "version": "1.0.0",
+      "runtimeHint": "npx",
+      "runtimeArguments": [
+        { "type": "named", "name": "-y" },
+        { "type": "named", "name": "-p", "value": "mail-index" },
+        { "type": "positional", "value": "mail-index-mcp" }
+      ],
+      "transport": { "type": "stdio" }
+    }
+  ]
+}
