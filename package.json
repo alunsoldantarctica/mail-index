@@ -36,11 +36,12 @@
     "node": ">=24"
   },
   "bin": {
-    "mail-index": "dist/cli/index.js",
-    "mail-index-mcp": "dist/mcp/index.js"
+    "mail-index": "bin/cli.mjs",
+    "mail-index-mcp": "bin/mcp.mjs"
   },
   "files": [
-    "dist"
+    "dist",
+    "bin"
   ],
   "scripts": {
     "build": "tsc",
