@@ -32,11 +32,16 @@ test('MAIL_INDEX_DB overrides the default index path (worktree isolation seam)',
   });
 });
 
-test('falls back to XDG_DATA_HOME, then ~/.local/share, when MAIL_INDEX_DB is unset/blank', () => {
-  withEnv({ MAIL_INDEX_DB: undefined, XDG_DATA_HOME: '/tmp/xdg' }, () => {
-    assert.equal(defaultDbPath(), '/tmp/xdg/mail-index/mail.sqlite');
-  });
-  withEnv({ MAIL_INDEX_DB: '   ', XDG_DATA_HOME: '/tmp/xdg' }, () => {
-    assert.equal(defaultDbPath(), '/tmp/xdg/mail-index/mail.sqlite'); // blank ignored
-  });
+test('without MAIL_INDEX_DB the path is deterministic: production sqlite OR a worktree dev DB', () => {
+  // Context-robust: from the installed package / canonical checkout this resolves
+  // the shared production index; from a LINKED worktree it auto-isolates to
+  // `<worktree>/.mail-index-dev.sqlite`. Either is valid — assert the shape, not
+  // the absolute path, so the suite passes in both. Blank MAIL_INDEX_DB == unset.
+  for (const blank of [undefined, '   ']) {
+    withEnv({ MAIL_INDEX_DB: blank, XDG_DATA_HOME: '/tmp/xdg' }, () => {
+      const p = defaultDbPath();
+      const ok = p === '/tmp/xdg/mail-index/mail.sqlite' || p.endsWith('/.mail-index-dev.sqlite');
+      assert.ok(ok, `unexpected default db path: ${p}`);
+    });
+  }
 });

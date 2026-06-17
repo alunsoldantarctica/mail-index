@@ -12,8 +12,9 @@
 
 import { DatabaseSync } from 'node:sqlite';
 import { homedir } from 'node:os';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, existsSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { getUserVersion, runMigrations } from './migrations.js';
 
 /** Error thrown for index-layer failures (open, migrate, repo invariants). */
@@ -32,20 +33,42 @@ export interface OpenOptions {
 }
 
 /**
+ * If this build is running from a LINKED git worktree, return that worktree's
+ * root; otherwise null. The single production index is shared by every worktree
+ * and the installed CLI/MCP, and migrations are forward-only — so a dev build in
+ * a worktree running a new migration bumps `user_version` past what the
+ * installed (older) build supports and breaks it. A linked worktree's `.git` is
+ * a FILE (a `gitdir:` pointer), whereas the main worktree's `.git` is a
+ * directory and an npm-installed package has none — so this cleanly isolates dev
+ * worktrees while leaving the install and the canonical checkout on production.
+ */
+function linkedWorktreeRoot(): string | null {
+  try {
+    // dist/index/db.js → package root is two levels up.
+    const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+    const git = join(root, '.git');
+    if (existsSync(git) && statSync(git).isFile()) return root;
+  } catch {
+    /* fall through to the shared default */
+  }
+  return null;
+}
+
+/**
  * Resolve the default index path. Precedence:
  *
- *  1. `MAIL_INDEX_DB` — an explicit DB file path. This is the seam for ISOLATING
- *     a dev/worktree index from the production one: every worktree + the
- *     installed CLI/MCP otherwise share the single default DB, so a forward
- *     migration run from any worktree bumps `user_version` past what the
- *     installed (older) build supports and breaks it. Point each worktree at its
- *     own file (e.g. `<worktree>/.mail-index-dev.sqlite`) and only the install
- *     touches the real index.
- *  2. `${XDG_DATA_HOME:-~/.local/share}/mail-index/mail.sqlite` — the default.
+ *  1. `MAIL_INDEX_DB` — an explicit DB file path (always wins; the manual seam).
+ *  2. A linked git worktree → `<worktree>/.mail-index-dev.sqlite`, so dev builds
+ *     auto-isolate from the production index without anyone setting env (see
+ *     {@link linkedWorktreeRoot}).
+ *  3. `${XDG_DATA_HOME:-~/.local/share}/mail-index/mail.sqlite` — the shared
+ *     production default (installed CLI/MCP + the canonical checkout).
  */
 export function defaultDbPath(): string {
   const explicit = process.env['MAIL_INDEX_DB'];
   if (explicit && explicit.trim() !== '') return explicit;
+  const wt = linkedWorktreeRoot();
+  if (wt) return join(wt, '.mail-index-dev.sqlite');
   const xdg = process.env['XDG_DATA_HOME'];
   const base = xdg && xdg.trim() !== '' ? xdg : join(homedir(), '.local', 'share');
   return join(base, 'mail-index', 'mail.sqlite');

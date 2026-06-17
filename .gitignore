@@ -39,3 +39,6 @@ docs/SCOPE.md
 
 # MCP bundle artifact (pack with `pnpm bundle`)
 *.mcpb
+
+# Per-worktree dev index (DB isolation, db.ts)
+.mail-index-dev.sqlite*
