@@ -240,12 +240,73 @@ const m004_ocr_images: Migration = {
   },
 };
 
+/**
+ * Migration 5 — rebuild `messages_fts` to the canonical self-contained schema.
+ *
+ * Pre-v1 prototype builds (the shell-to-`sqlite3` CLI) created a 7-column
+ * `messages_fts` (`account, gmail_message_id, thread_id, subject, sender,
+ * recipients, body`) and kept it in sync by `(account, gmail_message_id)` —
+ * DELETE+re-INSERT on every upsert. That reassigns the FTS rowid each time, so
+ * the FTS rowid drifts away from `messages.rowid`. v1's repo layer (ADR-0006)
+ * uses a 4-column SELF-CONTAINED FTS keyed by `messages.rowid` (search JOINs
+ * `f.rowid = m.rowid`). On a DB carrying the prototype's table, v1 search
+ * silently returns the WRONG message for every drifted row.
+ *
+ * This migration unconditionally drops `messages_fts` and rebuilds it in the
+ * canonical shape, repopulating every row from `messages` BY ROWID using the
+ * exact body formula `Repo.#syncFts` applies: `body` = snippet + distilled body
+ * (only when `body_state = 'full'`) + agent summary, newline-joined, empties
+ * dropped; `recipients` = `to_addr` + `cc_addr`. Idempotent — on a DB already
+ * in canonical shape it produces an equivalent index.
+ */
+const m005_rebuild_fts: Migration = {
+  version: 5,
+  name: 'rebuild messages_fts (canonical self-contained, rowid-aligned)',
+  up: (db) => {
+    db.exec(`
+      DROP TABLE IF EXISTS messages_fts;
+
+      CREATE VIRTUAL TABLE messages_fts USING fts5(
+        subject,
+        sender,
+        recipients,
+        body
+      );
+
+      INSERT INTO messages_fts(rowid, subject, sender, recipients, body)
+      SELECT
+        m.rowid,
+        m.subject,
+        m.from_addr,
+        -- recipients = to + cc (filter(Boolean).join(' '))
+        NULLIF(TRIM(COALESCE(m.to_addr, '') || ' ' || COALESCE(m.cc_addr, '')), ''),
+        -- body = [snippet, body_text (full only), summary].filter(Boolean).join('\\n')
+        NULLIF(
+          TRIM(
+            COALESCE(NULLIF(m.snippet, ''), '')
+            || CASE
+                 WHEN m.body_state = 'full' AND COALESCE(m.body_text, '') <> ''
+                 THEN char(10) || m.body_text ELSE ''
+               END
+            || CASE
+                 WHEN COALESCE(m.summary_text, '') <> ''
+                 THEN char(10) || m.summary_text ELSE ''
+               END
+          ),
+          ''
+        )
+      FROM messages m;
+    `);
+  },
+};
+
 /** All migrations, in ascending version order. Append-only. */
 export const MIGRATIONS: readonly Migration[] = [
   m001_initial,
   m002_thread_summary,
   m003_account_identity,
   m004_ocr_images,
+  m005_rebuild_fts,
 ];
 
 /** Read the database's applied schema version (SQLite `user_version`). */
