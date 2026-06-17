@@ -375,6 +375,46 @@ const m007_porter_fts: Migration = {
   },
 };
 
+/**
+ * Migration 8 — topic-clustering tables (UNS-1249).
+ *
+ * Mirrored verbatim from the UNS-1249 topic-clustering branch so a DB that the
+ * topic-clustering work has already migrated to v8 stays openable by the
+ * mainline CLI/MCP (forward-only: code must know every version the DB has seen).
+ * Pure additive DDL — `topics` holds a per-account cluster signature + the
+ * agent-assigned name; `thread_topics` maps each thread to its cluster. Inert in
+ * mainline until the clustering engine lands; it only makes the schema version
+ * agree. Keep byte-identical to the UNS-1249 definition so the two converge with
+ * no duplicate when that feature merges.
+ */
+const m008_topics: Migration = {
+  version: 8,
+  name: 'topic clustering tables',
+  up: (db) => {
+    db.exec(`
+      CREATE TABLE topics (
+        account     TEXT    NOT NULL,
+        topic_id    INTEGER NOT NULL,
+        keywords    TEXT,                -- JSON array: top TF-IDF terms (signature)
+        label       TEXT,                -- agent-assigned name; NULL until named
+        description TEXT,                -- agent-assigned; NULL until named
+        named_at    TEXT,                -- stamp when the agent named it
+        built_at    TEXT,                -- stamp of the clustering run
+        PRIMARY KEY (account, topic_id)
+      );
+
+      CREATE TABLE thread_topics (
+        account   TEXT    NOT NULL,
+        thread_id TEXT    NOT NULL,
+        topic_id  INTEGER NOT NULL,
+        PRIMARY KEY (account, thread_id)
+      );
+
+      CREATE INDEX idx_thread_topics_topic ON thread_topics (account, topic_id);
+    `);
+  },
+};
+
 /** All migrations, in ascending version order. Append-only. */
 export const MIGRATIONS: readonly Migration[] = [
   m001_initial,
@@ -384,6 +424,7 @@ export const MIGRATIONS: readonly Migration[] = [
   m005_rebuild_fts,
   m006_registrable_domain,
   m007_porter_fts,
+  m008_topics,
 ];
 
 /** Read the database's applied schema version (SQLite `user_version`). */

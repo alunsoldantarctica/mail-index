@@ -32,10 +32,20 @@ export interface OpenOptions {
 }
 
 /**
- * Resolve the default index path:
- * `${XDG_DATA_HOME:-~/.local/share}/mail-index/mail.sqlite`.
+ * Resolve the default index path. Precedence:
+ *
+ *  1. `MAIL_INDEX_DB` — an explicit DB file path. This is the seam for ISOLATING
+ *     a dev/worktree index from the production one: every worktree + the
+ *     installed CLI/MCP otherwise share the single default DB, so a forward
+ *     migration run from any worktree bumps `user_version` past what the
+ *     installed (older) build supports and breaks it. Point each worktree at its
+ *     own file (e.g. `<worktree>/.mail-index-dev.sqlite`) and only the install
+ *     touches the real index.
+ *  2. `${XDG_DATA_HOME:-~/.local/share}/mail-index/mail.sqlite` — the default.
  */
 export function defaultDbPath(): string {
+  const explicit = process.env['MAIL_INDEX_DB'];
+  if (explicit && explicit.trim() !== '') return explicit;
   const xdg = process.env['XDG_DATA_HOME'];
   const base = xdg && xdg.trim() !== '' ? xdg : join(homedir(), '.local', 'share');
   return join(base, 'mail-index', 'mail.sqlite');
