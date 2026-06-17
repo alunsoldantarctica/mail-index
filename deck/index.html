@@ -12,23 +12,45 @@
   pans/zooms between them (anime.js v4).
 
   Direction: TERMINAL — mono type, phosphor-green accent on near-black.
-  EVERYTHING brand-specific lives in the :root tokens below.
 
+  THREE stations embed the real GitHub demos as full-bleed iframes
+  (../docs/demo/*.html) and replay them on entry. Because of those
+  iframes the deck must be SERVED, not opened from file:// —
+    python3 -m http.server 8000 --bind 127.0.0.1
+    open http://127.0.0.1:8000/deck/index.html
   anime.js is vendored locally (anime.umd.min.js) — no wifi dependency.
   ============================================================
 -->
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+<!-- JetBrains Mono is vendored locally (fonts/) — no wifi dependency. -->
 <style>
+  /* ---------- JetBrains Mono — vendored (latin + latin-ext, 400/600/800) ---------- */
+  @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400; font-display: swap;
+    src: url("fonts/jetbrains-mono-latin-400.woff2") format("woff2");
+    unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+  @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 600; font-display: swap;
+    src: url("fonts/jetbrains-mono-latin-600.woff2") format("woff2");
+    unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+  @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 800; font-display: swap;
+    src: url("fonts/jetbrains-mono-latin-800.woff2") format("woff2");
+    unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+  @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400; font-display: swap;
+    src: url("fonts/jetbrains-mono-latin-ext-400.woff2") format("woff2");
+    unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }
+  @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 600; font-display: swap;
+    src: url("fonts/jetbrains-mono-latin-ext-600.woff2") format("woff2");
+    unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }
+  @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 800; font-display: swap;
+    src: url("fonts/jetbrains-mono-latin-ext-800.woff2") format("woff2");
+    unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }
+
   /* ==========================================================
      DESIGN TOKENS — Terminal direction (references/design.md §3)
      ========================================================== */
   :root {
     --bg:        #0C0E0C;   /* canvas — near-black phosphor terminal */
-    --ink:       #D8E3D6;   /* primary type */
-    --ink-soft:  #A9B8A6;   /* body copy */
-    --muted:     #5C6B5A;   /* captions, eyebrows */
+    --ink:       #E8F0E6;   /* primary type — brighter */
+    --ink-soft:  #C6D4C3;   /* body copy — brighter, readable on black */
+    --muted:     #8FA08C;   /* captions, eyebrows — lifted off near-black */
     --accent:    #4ADE80;   /* ONE accent — phosphor green */
     --line:      rgba(216,227,214,.16);
 
@@ -50,6 +72,8 @@
   /* Dark-first: a plain station is dark, so the letterbox default is dark and
      body.invert-hud flips it LIGHT behind the .invert (light) stations. */
   body.invert-hud, body.invert-hud #viewport { background: var(--ink); }
+  /* Demo stations get a near-black letterbox that frames the warm-paper demo. */
+  body.demo-hud, body.demo-hud #viewport { background: #0a0d0a; }
   #world { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
 
   .station {
@@ -64,6 +88,17 @@
   .station.invert .eyebrow { color: var(--bg); }
   .station.invert .lead { color: var(--bg); opacity: .78; }
   .station.invert .accent { color: #16a34a; } /* phosphor washes out on light — darken */
+
+  /* ---------- a station that IS the live GitHub demo ---------- */
+  .station.site-full { padding: 0; overflow: hidden; background: #f0eee6; }
+  .site-frame { position: absolute; top: 0; left: 0; width: 1920px; height: 1080px;
+                border: 0; pointer-events: none; background: #f0eee6; }
+  /* a small phosphor tag pinned to the demo so it still reads as part of the deck */
+  .site-tag { position: absolute; left: 44px; top: 38px; z-index: 3;
+              font-family: var(--font-body); font-size: 18px; font-weight: 700;
+              letter-spacing: .1em; text-transform: uppercase; color: #0C0E0C;
+              background: var(--accent); padding: 9px 16px; border-radius: 6px;
+              box-shadow: 0 10px 34px -12px rgba(0,0,0,.5); }
 
   /* ---------- shared type scale ---------- */
   .eyebrow {
@@ -80,7 +115,7 @@
   .display.md   { font-size: 138px; }
   .display.sm   { font-size: 96px; }
   .display .accent { color: var(--accent); }
-  .lead { font-weight: 400; font-size: 32px; line-height: 1.4; color: var(--ink-soft); max-width: 1100px; }
+  .lead { font-weight: 500; font-size: 33px; line-height: 1.42; color: var(--ink); max-width: 1100px; }
 
   /* line-reveal mask */
   .clip { overflow: hidden; display: block; }
@@ -121,65 +156,31 @@
   #s2 .lead { margin-top: 56px; }
   #s3 .lead { margin-top: 56px; }
 
-  #s4 .agenda { display: flex; flex-direction: column; gap: 26px; margin-top: 64px; max-width: 1400px; }
-  #s4 .agenda .item { display: flex; align-items: baseline; gap: 28px; font-size: 38px; font-weight: 600; }
-  #s4 .agenda .item .num { font-size: 20px; color: var(--accent); font-variant-numeric: tabular-nums; }
-  #s4 .agenda .item .sub { font-size: 24px; font-weight: 400; color: var(--muted); }
+  #s5 .agenda { display: flex; flex-direction: column; gap: 26px; margin-top: 64px; max-width: 1400px; }
+  #s5 .agenda .item { display: flex; align-items: baseline; gap: 28px; font-size: 40px; font-weight: 700; color: var(--ink); }
+  #s5 .agenda .item .num { font-size: 22px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
+  #s5 .agenda .item .sub { font-size: 25px; font-weight: 500; color: var(--ink-soft); }
 
-  /* The proof station */
-  #s6 .lead { margin-top: 44px; }
-  #s6 .stats { display: flex; gap: 64px; margin-top: 54px; }
-  #s6 .stats .stat { display: flex; flex-direction: column; gap: 8px; }
-  #s6 .stats .stat .big { font-size: 76px; font-weight: 800; color: var(--accent); line-height: 1; }
-  #s6 .stats .stat .cap { font-size: 22px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .12em; }
+  /* The proof headline */
+  #s7 .lead { margin-top: 44px; }
 
   /* Trust station */
-  #s7 .pillars { display: flex; flex-direction: column; gap: 30px; margin-top: 60px; max-width: 1300px; }
-  #s7 .pillars .p { display: flex; align-items: baseline; gap: 26px; font-size: 36px; font-weight: 600; }
-  #s7 .pillars .p .mark { color: #16a34a; font-weight: 800; }
-  #s7 .pillars .p .sub { font-size: 24px; font-weight: 400; opacity: .7; }
+  #s9 .pillars { display: flex; flex-direction: column; gap: 30px; margin-top: 60px; max-width: 1300px; }
+  #s9 .pillars .p { display: flex; align-items: baseline; gap: 26px; font-size: 36px; font-weight: 600; }
+  #s9 .pillars .p .mark { color: #16a34a; font-weight: 800; }
+  #s9 .pillars .p .sub { font-size: 24px; font-weight: 400; opacity: .7; }
 
   /* Install station — terminal code block */
-  #s8 .term { margin-top: 56px; max-width: 1500px; background: #07120b;
+  #s10 .term { margin-top: 56px; max-width: 1500px; background: #07120b;
               border: 1px solid var(--line); border-radius: 10px; padding: 40px 48px;
               font-size: 34px; line-height: 1.7; }
-  #s8 .term .row { white-space: nowrap; }
-  #s8 .term .prompt { color: var(--accent); }
-  #s8 .term .cmt { color: var(--muted); }
-  #s8 .meta { margin-top: 36px; font-size: 24px; color: var(--muted); letter-spacing: .04em; }
+  #s10 .term .row { white-space: nowrap; }
+  #s10 .term .prompt { color: var(--accent); }
+  #s10 .term .cmt { color: var(--muted); }
+  #s10 .meta { margin-top: 36px; font-size: 24px; color: var(--muted); letter-spacing: .04em; }
 
-  #s9 .credits { margin-top: 48px; font-size: 26px; color: var(--bg); opacity: .8;
+  #s11 .credits { margin-top: 48px; font-size: 26px; color: var(--bg); opacity: .8;
                  border-top: 1px solid rgba(12,14,12,.2); padding-top: 28px; max-width: 1000px; }
-
-  /* SVG diagram station */
-  #s5 .diagram { margin-top: 64px; }
-  #s5 .node rect { fill: none; stroke: var(--bg); stroke-width: 2.5; }
-  #s5 .node text { fill: var(--bg); font-family: var(--font-body); font-size: 21px; font-weight: 600; letter-spacing: .04em; text-anchor: middle; }
-  #s5 .wire { fill: none; stroke: var(--bg); stroke-width: 2; opacity: .85; }
-  #s5 .wire.miss { stroke-dasharray: 8 8; opacity: .5; }
-  #s5 .pulse { fill: #16a34a; opacity: 0; }
-  #s5 .wirelabel { fill: var(--bg); opacity: .55; font-family: var(--font-body); font-size: 16px; letter-spacing: .08em; text-anchor: middle; }
-
-  /* ---------- persistent QR → GitHub (on every slide) ---------- */
-  #qr {
-    position: fixed; top: 28px; right: 32px; z-index: 50;
-    display: flex; flex-direction: column; align-items: center; gap: 7px;
-    background: #fff; padding: 11px 11px 9px; border-radius: 10px;
-    box-shadow: 0 10px 30px rgba(0,0,0,.30); text-decoration: none; cursor: pointer;
-  }
-  #qr img { width: 112px; height: 112px; display: block; }
-  #qr .qrcap { font-family: var(--font-body); font-size: 10.5px; font-weight: 600;
-               letter-spacing: .12em; text-transform: uppercase; color: #0C0E0C; opacity: .68; }
-
-  /* ---------- "ask your Claude" prompt on the close station ---------- */
-  #s9 .askclaude {
-    margin-top: 50px; max-width: 1500px; background: #07120b; color: var(--ink);
-    border: 1px solid rgba(12,14,12,.18); border-radius: 10px; padding: 30px 42px;
-  }
-  #s9 .ask-label { font-size: 18px; letter-spacing: .16em; text-transform: uppercase;
-                   color: var(--accent); font-weight: 600; margin-bottom: 14px; }
-  #s9 .ask-prompt { font-size: 38px; line-height: 1.38; color: var(--ink); }
-  #s9 .ask-prompt .accent { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -211,8 +212,15 @@
       <p class="lead" data-fade>A local index over your whole inbox — fuzzy, ranked, snippet-first — so your agent answers the vague questions a query box can't.</p>
     </section>
 
-    <!-- 4 · HOW IT WORKS (dark) -->
-    <section class="station" id="s4" data-name="How it works" data-x="4600" data-y="1450">
+    <!-- 4 · LIVE DEMO: the MCP answering a vague question (real GitHub demo) -->
+    <section class="station site-full" id="s4" data-name="Watch it answer" data-x="4600" data-y="1450"
+             data-fly="dive" data-demo="../docs/demo/mcp-demo.html">
+      <div class="site-tag">Live · one local MCP call</div>
+      <iframe class="site-frame" title="mail-index MCP demo"></iframe>
+    </section>
+
+    <!-- 5 · HOW IT WORKS (dark) -->
+    <section class="station" id="s5" data-name="How it works" data-x="4600" data-y="2900">
       <div class="eyebrow" data-fade>How it works</div>
       <h2 class="display md" data-split="lines">Five moves</h2>
       <div class="agenda">
@@ -224,39 +232,29 @@
       </div>
     </section>
 
-    <!-- 5 · ARCHITECTURE (light) — bespoke scene + dive -->
-    <section class="station invert" id="s5" data-name="Architecture" data-x="4600" data-y="2900" data-scene="diagram" data-fly="dive">
-      <div class="eyebrow">Under the hood</div>
-      <h2 class="display sm" data-split="lines">Prewarm once,<br>serve locally</h2>
-      <svg class="diagram" width="1560" height="440" viewBox="0 0 1560 440">
-        <g class="node" id="n-gmail"><rect x="40" y="170" width="320" height="100" rx="10"/><text x="200" y="228">GMAIL</text></g>
-        <g class="node" id="n-index"><rect x="620" y="170" width="320" height="100" rx="10"/><text x="780" y="222">LOCAL SQLITE INDEX</text></g>
-        <g class="node" id="n-mcp"><rect x="1200" y="170" width="320" height="100" rx="10"/><text x="1360" y="222">MCP · AGENT</text></g>
-        <path class="wire" d="M 360 220 C 470 220, 510 220, 620 220"/>
-        <path class="wire" d="M 940 220 C 1050 220, 1090 220, 1200 220"/>
-        <text class="wirelabel" x="490" y="200">prewarm</text>
-        <text class="wirelabel" x="1070" y="200">recall</text>
-        <path class="wire miss" d="M 780 270 C 780 380, 200 380, 200 270"/>
-        <text class="wirelabel" x="490" y="404">fetch again only on a miss</text>
-        <circle class="pulse" r="7" cx="360" cy="220"/>
-        <circle class="pulse" r="7" cx="940" cy="220"/>
-      </svg>
+    <!-- 6 · LIVE DEMO: the sync/serve/miss flow (real GitHub demo) -->
+    <section class="station site-full" id="s6" data-name="Architecture" data-x="6900" data-y="2900"
+             data-fly="dive" data-demo="../docs/demo/sync-flow.html" data-fit="fill">
+      <div class="site-tag">Prewarm → serve local → fetch on miss</div>
+      <iframe class="site-frame" title="mail-index sync flow"></iframe>
     </section>
 
-    <!-- 6 · THE PROOF (dark) -->
-    <section class="station" id="s6" data-name="The proof" data-x="6900" data-y="2900">
-      <div class="eyebrow" data-fade>Measured on a real mailbox</div>
+    <!-- 7 · THE PROOF, headline (dark) -->
+    <section class="station" id="s7" data-name="The proof" data-x="6900" data-y="4350">
+      <div class="eyebrow" data-fade>Measured on a real 6-month mailbox</div>
       <h2 class="display mega" data-split="lines"><span class="accent">15.3×</span><br>fewer tokens</h2>
       <p class="lead" data-fade>Across a 100-question suite, mail-index answered every question for 15× fewer tokens than a stock Gmail-API MCP — and the gap widens exactly where lookup has no primitive at all.</p>
-      <div class="stats">
-        <div class="stat" data-fade><span class="big">32.8×</span><span class="cap">Summarize</span></div>
-        <div class="stat" data-fade><span class="big">24.7×</span><span class="cap">Relationship</span></div>
-        <div class="stat" data-fade><span class="big">13.0×</span><span class="cap">Finance</span></div>
-      </div>
     </section>
 
-    <!-- 7 · TRUST (light) -->
-    <section class="station invert" id="s7" data-name="Trust" data-x="6900" data-y="4350">
+    <!-- 8 · LIVE DEMO: the savings-by-category chart (real GitHub demo) -->
+    <section class="station site-full" id="s8" data-name="Savings by category" data-x="9200" data-y="4350"
+             data-demo="../docs/demo/chart-savings.html">
+      <div class="site-tag">Higher = fewer tokens</div>
+      <iframe class="site-frame" title="mail-index token savings by category"></iframe>
+    </section>
+
+    <!-- 9 · TRUST (light) -->
+    <section class="station invert" id="s9" data-name="Trust" data-x="9200" data-y="5800">
       <div class="eyebrow" data-fade>Trust posture</div>
       <h2 class="display" data-split="lines">Your mail never<br>leaves your machine.</h2>
       <div class="pillars">
@@ -266,8 +264,8 @@
       </div>
     </section>
 
-    <!-- 8 · INSTALL (dark) -->
-    <section class="station" id="s8" data-name="Install" data-x="9200" data-y="4350">
+    <!-- 10 · INSTALL (dark) -->
+    <section class="station" id="s10" data-name="Install" data-x="11500" data-y="5800">
       <div class="eyebrow" data-fade>Get it</div>
       <h2 class="display md" data-split="lines">Yours in<br>two lines</h2>
       <div class="term" data-fade>
@@ -279,14 +277,10 @@
       <div class="meta" data-fade>Node 24+ · zero native deps · <span style="color:var(--accent)">.mcpb</span> bundle for Claude Desktop</div>
     </section>
 
-    <!-- 9 · CLOSE (light) -->
-    <section class="station invert" id="s9" data-name="Built by Unsold" data-x="9200" data-y="5800">
+    <!-- 11 · CLOSE (light) -->
+    <section class="station invert" id="s11" data-name="Built by Unsold" data-x="11500" data-y="7250">
       <div class="eyebrow" data-fade>Built for the AI-native business</div>
       <h2 class="display sm" data-split="lines">Real, queryable context —<br>without handing over<br>the keys.</h2>
-      <div class="askclaude" data-fade>
-        <div class="ask-label">▸ Or just ask your Claude</div>
-        <div class="ask-prompt">"Install <span class="accent">mail-index</span> for me — it's an MCP server on npm. Add it to my Claude and set it up read-only on my Gmail."</div>
-      </div>
       <div class="credits" data-fade>Built by Unsold Group · MIT licensed · npmjs.com/package/mail-index · unsold.group/al</div>
     </section>
 
@@ -294,16 +288,10 @@
 </div>
 
 <div id="hud">
-  <div class="counter"><span id="idx">01</span> / <span id="total">09</span></div>
+  <div class="counter"><span id="idx">01</span> / <span id="total">11</span></div>
   <div id="rail"></div>
   <div class="station-name"></div>
 </div>
-
-<!-- Persistent QR → the GitHub repo, visible on every slide. -->
-<a id="qr" href="https://github.com/alunsoldantarctica/mail-index" target="_blank" rel="noopener">
-  <img src="qr-github.svg" alt="QR code to github.com/alunsoldantarctica/mail-index" />
-  <span class="qrcap">scan → github</span>
-</a>
 
 <!-- anime.js v4 UMD — VENDORED locally (no wifi dependency). -->
 <script src="anime.umd.min.js"></script>
@@ -360,9 +348,12 @@
     document.getElementById('idx').textContent = String(i + 1).padStart(2, '0');
     hud.querySelector('.station-name').textContent = stations[i].name;
     dots.forEach((d, k) => d.classList.toggle('active', k === i));
-    const inv = stations[i].el.classList.contains('invert');
+    const el = stations[i].el;
+    const inv = el.classList.contains('invert');
+    const demo = el.classList.contains('site-full');
     hud.classList.toggle('on-invert', inv);
-    document.body.classList.toggle('invert-hud', inv);
+    document.body.classList.toggle('invert-hud', inv);     // letterbox follows tone
+    document.body.classList.toggle('demo-hud', demo);
   }
 
   /* ---------- camera ---------- */
@@ -392,26 +383,44 @@
   }
   function toOverview() {
     overview = true; busy = true;
+    stopDemos(null);                       // silence every embedded demo while mapped out
     const c = overviewCam();
     animate(cam, { x: c.x, y: c.y, zoom: c.zoom, duration: 1300 * MOTION, ease: EASE,
       onUpdate: render, onComplete: () => busy = false });
   }
 
-  /* ---------- scene registry ---------- */
-  const sceneRegistry = {};
+  /* ---------- embedded GitHub demos (iframe replay-on-entry) ----------
+     The demos auto-run on load. We lazy-load on first entry and RESET the
+     src on every (re-)entry so the animation replays from frame zero; and we
+     blank off-screen demos so sync-flow's internal loop never runs hidden. */
+  function stopDemos(except) {
+    document.querySelectorAll('.site-frame').forEach(f => {
+      if (f !== except && f.src && !/about:blank$/.test(f.src)) f.src = 'about:blank';
+    });
+  }
+  function playDemo(s) {
+    const f = s.el.querySelector('.site-frame');
+    if (!f) return;
+    f.src = s.el.dataset.demo;            // (re)assigning src reloads → run() replays
+  }
 
   /* ---------- navigation ---------- */
   function goto(i, opts) {
     if (i < 0 || i >= stations.length) return;
     const prev = cur; cur = i; overview = false;
     setHud(i);
-    Object.values(sceneRegistry).forEach(sc => sc.stop());
     const s = stations[i], isNew = i !== prev;
+    const frame = s.el.querySelector('.site-frame');
+    stopDemos(frame || null);             // stop every OTHER demo
     if (s.el.dataset.fly === 'dive' && isNew) flyDive(s);
     else flyTo({ x: s.cx, y: s.cy, zoom: fitZoom(s) }, opts);
-    const scene = s.el.dataset.scene;
-    if (scene && sceneRegistry[scene]) sceneRegistry[scene].run(s.el);
-    else playIntro(s, true);
+    if (frame) {
+      // start the demo once the camera lands plus a beat; guard with a token
+      const token = i, flyDur = (s.el.dataset.fly === 'dive') ? 1750 : 1150;
+      setTimeout(() => { if (cur === token && !overview) playDemo(s); }, flyDur * MOTION + 280);
+    } else {
+      playIntro(s, true);
+    }
   }
 
   /* ---------- generic intro ---------- */
@@ -460,76 +469,6 @@
       ease: 'out(2)' });
   }
 
-  /* ---------- scene: "diagram" (stroke-draw + pulse) ---------- */
-  let diagramScene = null;
-  const wait = (scene, ms) => new Promise(res => scene.timers.push(setTimeout(res, ms * MOTION)));
-  function drawPaths(scene, paths, dur, baseDelay = 0, step = 0) {
-    paths.forEach((p, i) => {
-      const L = p.getTotalLength(), o = { v: L };
-      p.style.strokeDasharray = L; p.style.strokeDashoffset = L;
-      const a = animate(o, { v: [L, 0], duration: dur * MOTION, delay: (baseDelay + i * step) * MOTION,
-        ease: 'inOutQuad', onUpdate: () => { p.style.strokeDashoffset = o.v; } });
-      scene.anims.push(a);
-    });
-  }
-  function pulseAlong(scene, dot, path, dur, delay = 0) {
-    const L = path.getTotalLength();
-    scene.timers.push(setTimeout(() => {
-      if (scene.cancelled) return;
-      utils.set(dot, { opacity: 1 });
-      const prog = { t: 0 };
-      const a = animate(prog, { t: [0, 1], duration: dur * MOTION, ease: 'inOutQuad',
-        onUpdate: () => { const pt = path.getPointAtLength(L * prog.t);
-                          dot.setAttribute('cx', pt.x); dot.setAttribute('cy', pt.y); },
-        onComplete: () => { dot.style.opacity = 0; } });
-      scene.anims.push(a);
-    }, delay * MOTION));
-  }
-  sceneRegistry.diagram = {
-    stop() {
-      if (!diagramScene) return;
-      diagramScene.cancelled = true;
-      diagramScene.timers.forEach(clearTimeout);
-      diagramScene.anims.forEach(a => { try { a.pause(); } catch (e) {} });
-      diagramScene = null;
-    },
-    run(el) {
-      sceneRegistry.diagram.stop();
-      const scene = { cancelled: false, timers: [], anims: [] };
-      diagramScene = scene;
-      const q = s => el.querySelectorAll(s);
-      el.querySelectorAll('.clip').forEach(c => { c.style.overflow = 'hidden'; });
-      el.querySelectorAll('[data-split="lines"]').forEach(splitLines);
-      const lines = el.querySelectorAll('.lineInner');
-      utils.set(lines, { translateY: '100%' });
-      utils.set(el.querySelector('.eyebrow'), { opacity: 0 });
-      const dnodes = [...q('.node')], wires = [...q('.wire')], pulses = [...q('.pulse')], labels = [...q('.wirelabel')];
-      dnodes.forEach(n => utils.set(n, { opacity: 0 }));
-      wires.forEach(p => { const L = p.getTotalLength(); p.style.strokeDasharray = L; p.style.strokeDashoffset = L; });
-      labels.forEach(t => utils.set(t, { opacity: 0 }));
-      utils.set(pulses, { opacity: 0 });
-      (async () => {
-        scene.anims.push(animate(el.querySelector('.eyebrow'), { opacity: [0, .55], duration: 500 * MOTION }));
-        scene.anims.push(animate(lines, { translateY: ['100%', '0%'], duration: 1000 * MOTION, ease: EASE,
-          onComplete: () => releaseClips(el) }));
-        await wait(scene, 900); if (scene.cancelled) return;
-        dnodes.forEach((n, i) => scene.anims.push(
-          animate(n, { opacity: [0, 1], duration: 520 * MOTION, delay: i * 420 * MOTION, ease: 'out(3)' })));
-        await wait(scene, 600); if (scene.cancelled) return;
-        drawPaths(scene, wires.slice(0, 2), 700, 0, 420);
-        labels.slice(0, 2).forEach((t, i) => scene.anims.push(
-          animate(t, { opacity: [0, .55], duration: 500 * MOTION, delay: (200 + i * 420) * MOTION })));
-        await wait(scene, 1300); if (scene.cancelled) return;
-        pulseAlong(scene, pulses[0], wires[0], 700, 0);
-        pulseAlong(scene, pulses[1], wires[1], 700, 350);
-        await wait(scene, 900); if (scene.cancelled) return;
-        // the "miss" return path draws last, dashed + dimmer
-        drawPaths(scene, [wires[2]], 900, 0, 0);
-        scene.anims.push(animate(labels[2], { opacity: [0, .55], duration: 500 * MOTION, delay: 400 * MOTION }));
-      })();
-    }
-  };
-
   /* ---------- input ---------- */
   function next() { if (!busy && cur < stations.length - 1) goto(cur + 1); }
   function prev() { if (!busy && cur > 0) goto(cur - 1); }
@@ -559,8 +498,7 @@
     const st = stations[start];
     st.el.style.visibility = '';
     if (cur !== start) return;
-    const scene = st.el.dataset.scene;
-    if (scene && sceneRegistry[scene]) sceneRegistry[scene].run(st.el);
+    if (st.el.querySelector('.site-frame')) playDemo(st);   // deep-linked straight to a demo
     else playIntro(st, true);
   });
 })();
