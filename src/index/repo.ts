@@ -216,6 +216,8 @@ export interface DomainAggregate {
   domain: string;
   msgs: number;
   distinctContacts: number;
+  /** Registrable (eTLD+1) form of `domain`; brand-level grouping key. */
+  registrableDomain?: string | null;
 }
 
 /** A computed thread rollup (camelCase). */
@@ -1396,14 +1398,15 @@ export class Repo {
     }
 
     const up = this.#prepare(
-      `INSERT INTO domains (account, domain, msgs, distinct_contacts)
-       VALUES (?, ?, ?, ?)
+      `INSERT INTO domains (account, domain, msgs, distinct_contacts, registrable_domain)
+       VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(account, domain) DO UPDATE SET
-         msgs              = excluded.msgs,
-         distinct_contacts = excluded.distinct_contacts`,
+         msgs               = excluded.msgs,
+         distinct_contacts  = excluded.distinct_contacts,
+         registrable_domain = excluded.registrable_domain`,
     );
     for (const d of domains) {
-      up.run(account, d.domain, d.msgs, d.distinctContacts);
+      up.run(account, d.domain, d.msgs, d.distinctContacts, d.registrableDomain ?? null);
     }
   }
 
@@ -1448,6 +1451,19 @@ export class Repo {
         t.lastAt ?? null,
       );
     }
+  }
+
+  /**
+   * Per-host domain metadata for the cadence read: the raw sender host, its
+   * registrable (eTLD+1) brand key (migration 6; NULL until the next
+   * aggregation), and any agent-assigned entity `category`. Lets the cadence
+   * pass map a message's sender host to its brand + category without re-deriving
+   * either. Scoped to one account.
+   */
+  domainsMeta(account: string): { domain: string; registrable_domain: string | null; category: string | null }[] {
+    return this.#prepare(
+      `SELECT domain, registrable_domain, category FROM domains WHERE account = ?`,
+    ).all(account) as { domain: string; registrable_domain: string | null; category: string | null }[];
   }
 
   /** Fetch one aggregated contact row (or undefined). */
