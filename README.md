@@ -100,6 +100,16 @@ it doesn't install the adapter, sign you in, or sync.
   Settings). A signed all-in-one installer that *also* installs the adapter, signs
   you in, and syncs is still in progress; there is no `claude://` install link.
 
+**Teach your agent the common moves.** The MCP server already tells the agent
+*when* to reach for it (purchases, receipts, bookings, "who said what", "catch me
+up"), and the repo ships a Claude **[Agent Skill](skills/mail-index/SKILL.md)**
+with the typical recipes (find purchases, catch up, find a contact's mail,
+summarize a sender). Drop it in for Claude Code/Desktop:
+
+```sh
+mkdir -p ~/.claude/skills && cp -R skills/mail-index ~/.claude/skills/
+```
+
 Full walkthrough (auth, curation, enrichment, scheduled sync, desktop-app
 gotchas) → **[docs/INSTALL.md](docs/INSTALL.md)**. Driving setup with an agent →
 **[docs/agent-install.md](docs/agent-install.md)**.

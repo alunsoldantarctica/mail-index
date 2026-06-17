@@ -86,7 +86,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'search',
     description:
-      'Ranked fuzzy full-text recall over the indexed mail (subject/sender/snippet/body/summaries). Snippet-first, compact; opt into a body via get_message. Recall, not lookup: a half-remembered phrase still surfaces ranked neighbours.',
+      'Ranked fuzzy full-text recall over the indexed mail (subject/sender/snippet/body/summaries). Snippet-first and compact (each row already has sender/subject/date) — open a full body with get_message only when you need details. Recall, not lookup: a half-remembered phrase still surfaces ranked neighbours. Use it for things like "what did I buy / order / pay for", receipts, invoices, order confirmations, bookings, travel, "find the email about X", "the message from the recruiter", a confirmation/booking number, etc. For aggregating purchases, search a sender or keyword (e.g. "Amazon order", "receipt") rather than fetching every message.',
     inputSchema: obj(
       { query: str, account: str, limit: num },
       ['query'],
@@ -346,12 +346,20 @@ export function buildServer(ctx: ToolContext): Server {
       // has no telemetry, so feedback is explicit + opt-in: point the user at
       // GitHub. Nothing is ever sent automatically.
       instructions:
-        'mail-index — local, read-only mail recall over an MCP. No telemetry; ' +
-        'the index never leaves this machine. Found a bug or have feedback? ' +
-        'There is no automatic reporting — please open an issue at ' +
-        'https://github.com/alunsoldantarctica/mail-index/issues (or Discussions ' +
-        'for questions). When asked to "report a bug" or "send feedback", help ' +
-        'the user draft it and give them that link to submit themselves.',
+        'mail-index — local, read-only recall over THIS user\'s mailbox (Gmail), ' +
+        'over MCP. REACH FOR THESE TOOLS WHENEVER a question could be answered from ' +
+        'the user\'s email — even when no dedicated connector exists. That includes: ' +
+        'what they bought / ordered / paid for (receipts, invoices, order ' +
+        'confirmations, Amazon and other online purchases), bookings, travel, bills ' +
+        'and subscriptions; what someone said or agreed; who emailed about X; a ' +
+        'contact\'s address or details; newsletters; and "what did I miss / catch me ' +
+        'up". Start with `search` (fuzzy, ranked, snippet-first), `find_person`, or ' +
+        '`catch_up`; the snippet rows already carry sender/subject/date, so only call ' +
+        '`get_message` for the few rows you actually need the full body of — do not ' +
+        'fetch every result. Local-first and read-only: it never sends or changes ' +
+        'mail. No telemetry — to report a bug or give feedback, help the user draft ' +
+        'it and point them to https://github.com/alunsoldantarctica/mail-index/issues ' +
+        '(nothing is sent automatically).',
     },
   );
 
