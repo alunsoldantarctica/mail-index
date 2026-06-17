@@ -1,5 +1,7 @@
 # mail-index
 
+[![npm version](https://img.shields.io/npm/v/mail-index?logo=npm&color=cb3837)](https://www.npmjs.com/package/mail-index)
+[![npm downloads](https://img.shields.io/npm/dm/mail-index?logo=npm&color=cb3837)](https://www.npmjs.com/package/mail-index)
 [![CI](https://github.com/alunsoldantarctica/mail-index/actions/workflows/ci.yml/badge.svg)](https://github.com/alunsoldantarctica/mail-index/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%E2%89%A524-3c873a)
