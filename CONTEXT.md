@@ -75,6 +75,16 @@ Retrieval from a vague starting point — fuzzy ranked search, entity entry
 points, ranked neighbors on a miss. The differentiator vs query-based
 (exact-lookup) mail MCPs.
 
+**FTS contract**:
+The single definition of how a Message becomes searchable and ranked: the
+`messages_fts` columns, the tokenizer (porter), the body projection that fills
+the `body` column from the Body state ladder (snippet + distilled body +
+summary), and the bm25 column weights. Owned in one module, depended on by both
+*index-time* (sync, Enrichment, migrations — via the projection) and
+*query-time* (search — via the match builder + weights). Single-sourcing it
+keeps ranking deterministic: index-time and query-time can never drift apart.
+_Avoid_: scattering query-building into `cli/`, projection into repo internals.
+
 **Correspondent**:
 A Contact the user has ever sent mail to (`msgs_sent > 0`, from the Sent
 index). The sharpest human-vs-noise separator; exposed as a filter/tag on

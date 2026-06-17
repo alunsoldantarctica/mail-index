@@ -86,7 +86,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'search',
     description:
-      'Ranked fuzzy full-text recall over the indexed mail (subject/sender/snippet/body/summaries). Snippet-first and compact (each row already has sender/subject/date) — open a full body with get_message only when you need details. Recall, not lookup: a half-remembered phrase still surfaces ranked neighbours. Use it for things like "what did I buy / order / pay for", receipts, invoices, order confirmations, bookings, travel, "find the email about X", "the message from the recruiter", a confirmation/booking number, etc. For aggregating purchases, search a sender or keyword (e.g. "Amazon order", "receipt") rather than fetching every message.',
+      'Ranked fuzzy full-text recall over the indexed mail (subject/sender/snippet/body/summaries), porter-stemmed so word forms match (refund≈refunds). Snippet-first and compact (each row already has sender/subject/date) — open a full body with get_message only when you need details. Recall, not lookup: a half-remembered phrase still surfaces ranked neighbours. Use it for things like "what did I buy / order / pay for", receipts, invoices, order confirmations, bookings, travel, "find the email about X", "the message from the recruiter", a confirmation/booking number, etc. For aggregating purchases, search a sender or keyword (e.g. "Amazon order", "receipt") rather than fetching every message. Semantic expansion is YOUR job: if a query returns too little, reissue with your own synonyms/related terms and across a few phrasings — the index does light stemming + a tiny synonym net, not concept search.',
     inputSchema: obj(
       { query: str, account: str, limit: num },
       ['query'],

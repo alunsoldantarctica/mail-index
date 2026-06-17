@@ -16,6 +16,8 @@
 
 import type { DatabaseSync } from 'node:sqlite';
 
+import { FTS_TABLE_DDL, projectFtsRow } from './fts.js';
+
 export interface Migration {
   version: number;
   name: string;
@@ -240,12 +242,64 @@ const m004_ocr_images: Migration = {
   },
 };
 
+/**
+ * Migration 5 — porter-stemmed FTS rebuild (FTS-tuning, PLAN; FTS contract).
+ *
+ * The FTS5 tokenizer is fixed at table-create time, so switching `messages_fts`
+ * to the porter stemmer (so "refund" matches "refunds") is a full rebuild, not
+ * an `ALTER`: drop the table, recreate it from the FTS contract's
+ * {@link FTS_TABLE_DDL}, and repopulate every row's FTS columns via the SAME
+ * projection the repo's live sync uses ({@link projectFtsRow}) — index-time and
+ * the rebuild can never disagree on what got indexed. Runs inside the migration
+ * transaction; bounded by the message count (one-time).
+ */
+const m005_porter_fts: Migration = {
+  version: 5,
+  name: 'porter-stemmed FTS rebuild',
+  up: (db) => {
+    db.exec(`DROP TABLE messages_fts;`);
+    db.exec(FTS_TABLE_DDL);
+    const rows = db
+      .prepare(
+        `SELECT rowid, subject, from_addr, to_addr, cc_addr, snippet, body_text, summary_text
+           FROM messages`,
+      )
+      .all() as {
+      rowid: number;
+      subject: string | null;
+      from_addr: string | null;
+      to_addr: string | null;
+      cc_addr: string | null;
+      snippet: string | null;
+      body_text: string | null;
+      summary_text: string | null;
+    }[];
+    const insert = db.prepare(
+      `INSERT INTO messages_fts(rowid, subject, sender, recipients, body)
+       VALUES (?, ?, ?, ?, ?)`,
+    );
+    for (const r of rows) {
+      const fts = projectFtsRow({
+        subject: r.subject,
+        fromAddr: r.from_addr,
+        toAddr: r.to_addr,
+        ccAddr: r.cc_addr,
+        snippet: r.snippet,
+        bodyText: r.body_text,
+        summary: r.summary_text,
+      });
+      insert.run(r.rowid, fts.subject, fts.sender, fts.recipients, fts.body);
+    }
+  },
+};
+
 /** All migrations, in ascending version order. Append-only. */
 export const MIGRATIONS: readonly Migration[] = [
   m001_initial,
   m002_thread_summary,
   m003_account_identity,
   m004_ocr_images,
+  m005_porter_fts,
 ];
 
 /** Read the database's applied schema version (SQLite `user_version`). */
