@@ -24,11 +24,13 @@ Read-only — it never sends or mutates your mail.
   <a href="docs/demo/mcp-demo.html">Interactive version →</a></sub>
 </p>
 
-> **Status: v1.0 core, building distribution.** Progressive sync, the
-> correspondence graph, the interest engine, curation, the full 18-tool MCP
-> surface, and the write-back loops are built and tested. Packaging — npm
-> publish, the `.mcpb` bundle, and the one-click installers — is in progress, so
-> today you install from source (below). Architecture lives in
+> **Status: v1.0 — published.** Progressive sync, the correspondence graph, the
+> interest engine, curation, the full 18-tool MCP surface, and the write-back
+> loops are built and tested — and `mail-index` is live on
+> **[npm](https://www.npmjs.com/package/mail-index)** with a
+> **[`.mcpb` bundle](https://github.com/alunsoldantarctica/mail-index/releases/latest)**.
+> Still in progress: the bundled Option A OAuth client and signed one-click
+> installers. Architecture lives in
 > **[docs/PLAN.md](docs/PLAN.md)**; start with **[docs/INSTALL.md](docs/INSTALL.md)**.
 
 ---
@@ -69,18 +71,16 @@ cap, no request — we walk you through it). See
 and [docs/oauth-and-verification.md](docs/oauth-and-verification.md).
 
 ```sh
-git clone https://github.com/alunsoldantarctica/mail-index.git
-cd mail-index
-pnpm install && pnpm build
+npm install -g mail-index                    # or: pnpm add -g mail-index
 
 mail-index init                              # scaffold the config
 # …connect a mailbox (own OAuth client, read-only) — see docs/INSTALL.md §2 / agent-install.md…
-node dist/cli/index.js sync  --account personal --since 6mo
-node dist/cli/index.js graph build --account personal
-node dist/cli/index.js search "that contract we discussed"
+mail-index sync  --account personal --since 6mo
+mail-index graph build --account personal
+mail-index search "that contract we discussed"
 ```
-*(Once published to npm, `npm i -g mail-index` gives you the `mail-index` /
-`mail-index-mcp` bins instead of `node dist/...`.)*
+*(Prefer source? `git clone …`, `pnpm install && pnpm build`, then run the bins
+as `node dist/cli/index.js …`.)*
 
 ### Add to Claude
 
@@ -88,15 +88,15 @@ The MCP server registers in one step, but it still needs a mailbox connected
 first (see the walkthrough). A `.mcpb`/`claude mcp add` only **adds the server** —
 it doesn't install the adapter, sign you in, or sync.
 
-- **Claude Code:** `claude mcp add --transport stdio mail-index -- mail-index-mcp`
-  *(uses the `npx -y -p mail-index …` form once the package is published).*
+- **Claude Code:** `claude mcp add --transport stdio mail-index -- npx -y -p mail-index mail-index-mcp`
 - **Any MCP client (manual):**
   ```jsonc
   { "mcpServers": { "mail-index": { "command": "mail-index-mcp" } } }
   ```
-- **Claude Desktop (planned):** a one-click `.mcpb` bundle + an all-in-one
-  DMG/MSI installer (which *does* install the adapter, sign in, and sync) are in
-  progress — there is no `claude://` install link.
+- **Claude Desktop:** download the **[`.mcpb` bundle](https://github.com/alunsoldantarctica/mail-index/releases/latest/download/mail-index.mcpb)**
+  and double-click it (unsigned during beta — you may need to allow it in System
+  Settings). A signed all-in-one installer that *also* installs the adapter, signs
+  you in, and syncs is still in progress; there is no `claude://` install link.
 
 Full walkthrough (auth, curation, enrichment, scheduled sync, desktop-app
 gotchas) → **[docs/INSTALL.md](docs/INSTALL.md)**. Driving setup with an agent →

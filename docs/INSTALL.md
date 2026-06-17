@@ -37,21 +37,20 @@ client**. You have two ways to provide one — see [§2](#2-connect-a-mailbox-pi
 
 ## 1. Install the tool
 
-Until the npm package is published, install from source:
-
 ```sh
-git clone https://github.com/alunsoldantarctica/mail-index.git
-cd mail-index && pnpm install && pnpm build
-# invoke as `node dist/cli/index.js <command>` (or symlink it onto your PATH)
+npm i -g mail-index          # or: pnpm add -g mail-index
+# …or run without installing: npx mail-index <command>
 ```
 
-Once published, `npm i -g mail-index` (or `npx mail-index <command>`) will give
-you the two bins directly:
+This gives you the two bins:
 
 | Bin | Purpose |
 |-----|---------|
 | `mail-index` | the CLI (ops + the fallback curation wizard) |
 | `mail-index-mcp` | the stdio MCP server (the agent surface) |
+
+Prefer source? `git clone` the repo, `pnpm install && pnpm build`, and invoke as
+`node dist/cli/index.js <command>`.
 
 ---
 
@@ -264,17 +263,20 @@ or its tools have nothing to read.
 
 - **Claude Code:**
   ```sh
-  claude mcp add --transport stdio mail-index -- mail-index-mcp
+  claude mcp add --transport stdio mail-index -- npx -y -p mail-index mail-index-mcp
   ```
-  (add `--scope project` to share it via a committed `.mcp.json`; once the
-  package is published you can use `-- npx -y -p mail-index mail-index-mcp`).
+  (add `--scope project` to share it via a committed `.mcp.json`; or use
+  `-- mail-index-mcp` directly if it's on your PATH).
 - **Any MCP client — manual config:**
   ```jsonc
   { "mcpServers": { "mail-index": { "command": "mail-index-mcp" } } }
   ```
-- **Claude Desktop (planned):** a one-click `.mcpb` bundle, plus an all-in-one
-  DMG/MSI installer that *does* the local setup (adapter + sign-in + sync) and
-  then registers the server. There is no `claude://` install link.
+- **Claude Desktop:** download the
+  [`.mcpb` bundle](https://github.com/alunsoldantarctica/mail-index/releases/latest/download/mail-index.mcpb)
+  and double-click it (unsigned during beta — allow it in System Settings if
+  prompted). Still in progress: a *signed* all-in-one DMG/MSI installer that
+  *also* does the local setup (adapter + sign-in + sync). There is no
+  `claude://` install link.
 
 **Desktop apps launch with a minimal environment** — two practical notes if the
 server fails to start or `get_message` can't enrich:
