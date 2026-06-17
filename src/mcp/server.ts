@@ -38,6 +38,7 @@ import {
   saveSummaryTool,
   domainsToCategorizeTool,
   saveDomainCategoryTool,
+  cadenceTool,
   syncStatus,
   catchUp,
   digestSources,
@@ -268,6 +269,20 @@ export const TOOLS: ToolDef[] = [
         category: String(a['category']),
         ...optStr(a, 'note'),
         ...optStr(a, 'account'),
+      }),
+  },
+  // ---- cadence (deterministic correspondent frequency) ----
+  {
+    name: 'cadence',
+    description:
+      'Inbound frequency per sender BRAND (registrable domain): volume, distinct senders, first/last seen, messages-per-month — over the whole index or since a time (30d, 1mo, ISO). Pass "category" to scope to one entity category you assigned via save_domain_category (e.g. all "expedition-operator" senders at once). Deterministic — use this instead of hand-writing SQL over senders.',
+    inputSchema: obj({ account: str, category: str, since: str, limit: num }),
+    run: (ctx, a) =>
+      cadenceTool(ctx, {
+        ...optStr(a, 'account'),
+        ...optStr(a, 'category'),
+        ...optStr(a, 'since'),
+        ...optNum(a, 'limit'),
       }),
   },
   // ---- status + composites ----

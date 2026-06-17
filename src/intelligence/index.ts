@@ -5,6 +5,12 @@ export {
   type Aggregates,
 } from './aggregate.js';
 export {
+  computeCadence,
+  type CadenceOptions,
+  type CadenceRow,
+} from './cadence.js';
+export { registrableDomain, hostOf } from './domain.js';
+export {
   scoreContact,
   interestPass,
   type ContactFeatures,
