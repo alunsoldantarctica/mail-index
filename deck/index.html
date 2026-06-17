@@ -156,31 +156,52 @@
   #s2 .lead { margin-top: 56px; }
   #s3 .lead { margin-top: 56px; }
 
-  #s5 .agenda { display: flex; flex-direction: column; gap: 26px; margin-top: 64px; max-width: 1400px; }
-  #s5 .agenda .item { display: flex; align-items: baseline; gap: 28px; font-size: 40px; font-weight: 700; color: var(--ink); }
-  #s5 .agenda .item .num { font-size: 22px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
-  #s5 .agenda .item .sub { font-size: 25px; font-weight: 500; color: var(--ink-soft); }
+  #s5 .agenda { display: flex; flex-direction: column; gap: 24px; margin-top: 52px; max-width: 1580px; }
+  #s5 .agenda .item { display: flex; align-items: baseline; gap: 26px; font-size: 42px; font-weight: 700; color: var(--ink); }
+  #s5 .agenda .item .num { font-size: 24px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
+  #s5 .agenda .item .sub { font-size: 30px; font-weight: 500; color: var(--ink-soft); }
 
   /* The proof headline */
   #s7 .lead { margin-top: 44px; }
 
   /* Trust station */
-  #s9 .pillars { display: flex; flex-direction: column; gap: 30px; margin-top: 60px; max-width: 1300px; }
-  #s9 .pillars .p { display: flex; align-items: baseline; gap: 26px; font-size: 36px; font-weight: 600; }
+  #s9 .pillars { display: flex; flex-direction: column; gap: 28px; margin-top: 52px; max-width: 1620px; }
+  #s9 .pillars .p { display: flex; align-items: baseline; gap: 24px; font-size: 44px; font-weight: 700; }
   #s9 .pillars .p .mark { color: #16a34a; font-weight: 800; }
-  #s9 .pillars .p .sub { font-size: 24px; font-weight: 400; opacity: .7; }
+  #s9 .pillars .p .sub { font-size: 32px; font-weight: 500; opacity: .85; }
 
   /* Install station — terminal code block */
-  #s10 .term { margin-top: 56px; max-width: 1500px; background: #07120b;
-              border: 1px solid var(--line); border-radius: 10px; padding: 40px 48px;
-              font-size: 34px; line-height: 1.7; }
+  #s10 .term { margin-top: 50px; max-width: 1620px; background: #0f261a;
+              border: 1px solid rgba(74,222,128,.40); border-radius: 10px; padding: 38px 46px;
+              font-size: 34px; line-height: 1.75; color: #EAF7E8; font-weight: 600; }
   #s10 .term .row { white-space: nowrap; }
-  #s10 .term .prompt { color: var(--accent); }
-  #s10 .term .cmt { color: var(--muted); }
-  #s10 .meta { margin-top: 36px; font-size: 24px; color: var(--muted); letter-spacing: .04em; }
+  #s10 .term .prompt { color: var(--accent); font-weight: 800; }
+  #s10 .term .cmt { color: #8BD0A1; font-weight: 500; }
+  #s10 .meta { margin-top: 34px; font-size: 26px; color: var(--ink-soft); letter-spacing: .04em; }
 
-  #s11 .credits { margin-top: 48px; font-size: 26px; color: var(--bg); opacity: .8;
-                 border-top: 1px solid rgba(12,14,12,.2); padding-top: 28px; max-width: 1000px; }
+  #s11 .credits { margin-top: 44px; font-size: 26px; color: var(--bg); opacity: .8;
+                 border-top: 1px solid rgba(12,14,12,.2); padding-top: 26px; max-width: 1000px; }
+
+  /* ---------- persistent QR → GitHub (on every slide) ---------- */
+  #qr {
+    position: fixed; top: 28px; right: 32px; z-index: 50;
+    display: flex; flex-direction: column; align-items: center; gap: 7px;
+    background: #fff; padding: 11px 11px 9px; border-radius: 10px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.30); text-decoration: none; cursor: pointer;
+  }
+  #qr img { width: 112px; height: 112px; display: block; }
+  #qr .qrcap { font-family: var(--font-body); font-size: 10.5px; font-weight: 600;
+               letter-spacing: .12em; text-transform: uppercase; color: #0C0E0C; opacity: .68; }
+
+  /* ---------- "ask your Claude" prompt on the close station ---------- */
+  #s11 .askclaude {
+    margin-top: 42px; max-width: 1620px; background: #0f261a; color: var(--ink);
+    border: 1px solid rgba(74,222,128,.30); border-radius: 10px; padding: 28px 40px;
+  }
+  #s11 .ask-label { font-size: 19px; letter-spacing: .16em; text-transform: uppercase;
+                   color: var(--accent); font-weight: 700; margin-bottom: 13px; }
+  #s11 .ask-prompt { font-size: 36px; line-height: 1.38; color: #EAF7E8; font-weight: 500; }
+  #s11 .ask-prompt .accent { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -248,7 +269,7 @@
 
     <!-- 8 · LIVE DEMO: the savings-by-category chart (real GitHub demo) -->
     <section class="station site-full" id="s8" data-name="Savings by category" data-x="9200" data-y="4350"
-             data-demo="../docs/demo/chart-savings.html">
+             data-fly="dive" data-demo="../docs/demo/chart-savings.html" data-fit="fill">
       <div class="site-tag">Higher = fewer tokens</div>
       <iframe class="site-frame" title="mail-index token savings by category"></iframe>
     </section>
@@ -281,11 +302,21 @@
     <section class="station invert" id="s11" data-name="Built by Unsold" data-x="11500" data-y="7250">
       <div class="eyebrow" data-fade>Built for the AI-native business</div>
       <h2 class="display sm" data-split="lines">Real, queryable context —<br>without handing over<br>the keys.</h2>
+      <div class="askclaude" data-fade>
+        <div class="ask-label">▸ Or just ask your Claude</div>
+        <div class="ask-prompt">"Install <span class="accent">mail-index</span> for me — it's an MCP server on npm. Add it to my Claude and set it up read-only on my Gmail."</div>
+      </div>
       <div class="credits" data-fade>Built by Unsold Group · MIT licensed · npmjs.com/package/mail-index · unsold.group/al</div>
     </section>
 
   </div>
 </div>
+
+<!-- Persistent QR → the GitHub repo, visible on every slide (fixed, outside #world). -->
+<a id="qr" href="https://github.com/alunsoldantarctica/mail-index" target="_blank" rel="noopener">
+  <img src="qr-github.svg" alt="QR code to github.com/alunsoldantarctica/mail-index" />
+  <span class="qrcap">scan → github</span>
+</a>
 
 <div id="hud">
   <div class="counter"><span id="idx">01</span> / <span id="total">11</span></div>
@@ -401,7 +432,31 @@
   function playDemo(s) {
     const f = s.el.querySelector('.site-frame');
     if (!f) return;
+    // data-fit="fill" demos get enlarged + vertically centered on load (same-origin).
+    f.onload = (s.el.dataset.fit === 'fill')
+      ? () => { fitDemo(f); setTimeout(() => fitDemo(f), 1200); }
+      : null;
     f.src = s.el.dataset.demo;            // (re)assigning src reloads → run() replays
+  }
+  // Same-origin only: zoom the embedded demo so its content fills the slide height
+  // and sits centered. Cross-origin access throws → caught, leaving the demo as-is.
+  function fitDemo(f) {
+    try {
+      const d = f.contentDocument || f.contentWindow.document;
+      if (!d || !d.body) return;
+      let st = d.getElementById('__deckfit');
+      if (!st) { st = d.createElement('style'); st.id = '__deckfit'; (d.head || d.documentElement).appendChild(st); }
+      st.textContent = 'html,body{height:100%!important;margin:0!important}' +
+        'body{min-height:100vh!important;display:grid!important;place-items:center!important;' +
+        'padding:18px!important;overflow:hidden!important}';
+      d.documentElement.style.zoom = '1';
+      const el = d.querySelector('.stage, .card') || d.body;
+      const r = el.getBoundingClientRect();
+      if (r.height > 0) {
+        const k = Math.min((1080 * 0.94) / r.height, (1920 * 0.96) / r.width);
+        if (k > 1.02) d.documentElement.style.zoom = Math.min(k, 2.6).toFixed(3);
+      }
+    } catch (e) {}
   }
 
   /* ---------- navigation ---------- */
