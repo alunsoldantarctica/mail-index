@@ -1,0 +1,35 @@
+name: Publish to MCP Registry
+
+# Publishes server.json to the official MCP Registry
+# (https://registry.modelcontextprotocol.io). The registry hosts only metadata;
+# the runnable artifact must already be on npm (see release.yml).
+#
+# Auth is via GitHub OIDC — the registry verifies that this workflow runs in the
+# `alunsoldantarctica` org, which owns the `io.github.alunsoldantarctica/*`
+# namespace declared in server.json's `name`. No interactive login / token.
+on:
+  workflow_dispatch: {}
+  release:
+    types: [published] # auto-publish metadata whenever a GitHub Release goes out
+
+permissions:
+  contents: read
+  id-token: write # required for `mcp-publisher login github-oidc`
+
+jobs:
+  publish-registry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Download the mcp-publisher CLI
+        run: |
+          curl -sSfL \
+            "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" \
+            | tar xz mcp-publisher
+
+      - name: Authenticate via GitHub OIDC
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish server.json
+        run: ./mcp-publisher publish
