@@ -87,12 +87,15 @@ Once you're on the list, a `mail-index setup` wizard will install the adapter,
 place the **mail-index** OAuth client, and run the browser sign-in — no Google
 Cloud console.
 
-**The `setup` wizard isn't built yet**, so today use **Option B** (your own
-client — same end state, just one console visit). When it ships it will, per
-mailbox: install gog, pipe in the bundled client (`gog auth credentials set -`),
-then `gog auth add you@gmail.com --services gmail --gmail-scope=readonly` (you
-approve the "unverified app — mail-index" read-only consent screen; an
-`access blocked / not a test user` error means your address isn't on the list yet).
+The `setup` wizard **is built** (`mail-index setup --account you@gmail.com`) and
+runs this per mailbox: install gog, place the OAuth client, then
+`gog auth add … --gmail-scope=readonly` (you approve the "unverified app —
+mail-index" read-only consent screen; an `access blocked / not a test user` error
+means your address isn't on the list yet). **What's still pending is the *bundled*
+mail-index client** — it isn't distributed in the package yet, so without a client
+on disk `setup` falls back to printing the manual `gog auth` steps. Until that
+ships, **Option B** (your own client — same end state, one console visit) is the
+working path; pass it to the same wizard with `mail-index setup --client <path>`.
 
 ### Option B — bring your own Google Cloud OAuth client (no caps)
 
