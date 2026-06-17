@@ -181,7 +181,10 @@ mail-index status  [--json]              Per-account freshness + counts
 - **[SECURITY.md](.github/SECURITY.md)** + **[docs/THREAT-MODEL.md](docs/THREAT-MODEL.md)**
   — privacy posture, trust boundaries, prompt-injection stance, and a
   "verify our claims yourself" runbook. The local-only promise is enforced in CI
-  by an [egress guard test](test/egress-guard.test.ts).
+  by an [egress guard test](test/egress-guard.test.ts) — the core (`src/`) makes
+  no network calls; the one exception is the opt-out launch-shim self-updater
+  (`bin/selfupdate.mjs`, throttled npm-version check, `MAIL_INDEX_NO_AUTOUPDATE=1`
+  to disable), audited by the same guard.
 
 ## About
 

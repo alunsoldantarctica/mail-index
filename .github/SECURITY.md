@@ -51,12 +51,19 @@ build if any network primitive appears in `src/`, a dependency audit + a gitleak
 secret scan run on every push ([`.github/workflows/security.yml`](.github/workflows/security.yml)),
 and installs use `--ignore-scripts` (no dependency postinstall runs).
 
+There is exactly one network seam outside the provider boundary, and it is
+quarantined out of the core: the launch shim's self-updater (`bin/selfupdate.mjs`)
+makes a throttled (once / 24h) request to the npm registry to check for a newer
+release, applied on the next launch. It is opt-out (`MAIL_INDEX_NO_AUTOUPDATE=1`)
+and the egress guard audits `bin/` too, pinning network access to that one file.
+
 To confirm it yourself:
 
 ```sh
 # 1. It doesn't phone home. Watch egress while you sync — you should see traffic
-#    ONLY to the provider (Google), nothing else. (macOS: Little Snitch / lsof;
-#    Linux: ss/tcpdump.)
+#    ONLY to the provider (Google). The opt-out self-updater also contacts the
+#    npm registry (once/24h); set MAIL_INDEX_NO_AUTOUPDATE=1 and you'll see
+#    nothing but the provider. (macOS: Little Snitch / lsof; Linux: ss/tcpdump.)
 sudo lsof -i -nP -p "$(pgrep -f mail-index | head -1)"     # while a sync runs
 
 # 2. No network calls in the tool's own code (the egress guard, run directly):

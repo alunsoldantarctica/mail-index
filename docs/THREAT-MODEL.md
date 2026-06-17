@@ -29,14 +29,24 @@ are, and how you can verify the claims yourself ([SECURITY.md](../.github/SECURI
    network egress          └─────────────────────────────────────────────────┘
 ```
 
-**The egress boundary is one process spawn.** mail-index's own code makes no
-network calls of any kind. The only way it reaches the network is by spawning the
-provider adapter CLI (the gws adapter, `src/source/adapters/gws/runner.ts`). This
-is enforced as a build-breaking test ([`test/egress-guard.test.ts`](../test/egress-guard.test.ts)):
+**The egress boundary is one process spawn.** The mail-index *core* (`src/`)
+makes no network calls of any kind. The only way the core reaches the network is
+by spawning the provider adapter CLI (the gws adapter, `src/source/adapters/gws/runner.ts`).
+This is enforced as a build-breaking test ([`test/egress-guard.test.ts`](../test/egress-guard.test.ts)):
 CI fails if any network primitive (`fetch`, `node:http/https/net`, a network
 library, a telemetry SDK) appears anywhere in `src/`, or if a process is spawned
-outside the two audited seams (the adapter, and the MCP server's detached re-exec
+outside the audited seams (the adapter, and the MCP server's detached re-exec
 of mail-index's own `sync` CLI per [ADR-0005](adr/0005-stale-reads-trigger-background-sync.md)).
+
+**One auditable self-update seam, quarantined outside the core.** The launch
+shim (`bin/`) performs an optional, throttled (once / 24h), opt-out self-update
+check: it asks the npm registry whether a newer `mail-index` is published and, if
+so, updates the install for the *next* launch (it never touches the running
+process, so the core never gains network access at runtime). This is the only
+other network seam, and it is deliberately kept out of `src/` so the core stays
+provably egress-free. The egress guard scans `bin/` too and pins network access
+to exactly one file (`bin/selfupdate.mjs`) and spawning to the updater plus the
+launcher that fires it. Disable entirely with `MAIL_INDEX_NO_AUTOUPDATE=1`.
 
 ## What mail-index protects
 
