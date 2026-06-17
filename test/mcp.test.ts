@@ -477,7 +477,7 @@ test('surface: exactly the PLAN §12 tools are advertised, all with schemas, all
     'search', 'get_message', 'get_thread', 'list_contacts', 'get_contact',
     'find_person', 'list_threads', 'graph_neighbors', 'graph_communities',
     'interest_propose', 'interest_set', 'interest_get', 'save_summary',
-    'domains_to_categorize', 'save_domain_category', 'sync_status',
+    'domains_to_categorize', 'save_domain_category', 'cadence', 'sync_status',
     'catch_up', 'digest_sources',
   ];
   const names = TOOLS.map((t) => t.name);
@@ -520,10 +520,10 @@ test('setup mode: tools/list advertises exactly the reduced setup surface', () =
   }
 });
 
-test('setup mode: with config present the FULL 18-tool surface is what serve() would use', () => {
+test('setup mode: with config present the FULL 19-tool surface is what serve() would use', () => {
   // The config-present path serves the full surface — assert its size/identity
   // here so the bootstrapping branch never silently shrinks the real surface.
-  assert.equal(TOOLS.length, 18, 'full surface is 18 tools');
+  assert.equal(TOOLS.length, 19, 'full surface is 19 tools');
 });
 
 test('setup_status reports observation and does not crash with no config', () => {

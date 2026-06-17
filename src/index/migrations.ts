@@ -300,6 +300,28 @@ const m005_rebuild_fts: Migration = {
   },
 };
 
+/**
+ * Migration 6 — registrable (eTLD+1) domain on the derived `domains` table.
+ *
+ * `domains.domain` is the raw sender host, so one brand fragments across its
+ * bulk subdomains (`email.silversea.com`, `silversea.com`, …) — a poor key for
+ * "how often does this operator email me". This adds a `registrable_domain`
+ * column the aggregation pass fills (via `intelligence/domain.ts`
+ * `registrableDomain`) so brand-level rollups (the `cadence` read, category
+ * grouping) are deterministic. Pure column add; populated on the next
+ * aggregation, which runs after every sync. Left NULL for existing rows here —
+ * the `cadence` read falls back to computing the registrable domain on the fly
+ * when the column is NULL, so it is useful before the next sync, and
+ * aggregation backfills it durably thereafter.
+ */
+const m006_registrable_domain: Migration = {
+  version: 6,
+  name: 'registrable (eTLD+1) domain on domains',
+  up: (db) => {
+    db.exec(`ALTER TABLE domains ADD COLUMN registrable_domain TEXT;`);
+  },
+};
+
 /** All migrations, in ascending version order. Append-only. */
 export const MIGRATIONS: readonly Migration[] = [
   m001_initial,
@@ -307,6 +329,7 @@ export const MIGRATIONS: readonly Migration[] = [
   m003_account_identity,
   m004_ocr_images,
   m005_rebuild_fts,
+  m006_registrable_domain,
 ];
 
 /** Read the database's applied schema version (SQLite `user_version`). */

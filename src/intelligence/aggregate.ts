@@ -45,6 +45,7 @@ import type {
   ThreadAggregate,
 } from '../index/repo.js';
 import { extractAddress } from '../ingest/classify.js';
+import { registrableDomain } from './domain.js';
 
 /** The domain portion of a bare address (`a@b.com` → `b.com`), or null. */
 function domainOf(address: string): string | null {
@@ -289,6 +290,7 @@ export function computeAggregates(
     domain,
     msgs: d.msgs,
     distinctContacts: d.contacts,
+    registrableDomain: registrableDomain(domain),
   }));
 
   // ---- finalize threads ----

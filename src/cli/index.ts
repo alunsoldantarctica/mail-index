@@ -28,6 +28,7 @@ import { formatResults, runSearchEnriching, type SearchFlags } from './search.js
 import { formatShow, parseRef, runShow, RefError } from './show.js';
 import { formatOpen, runOpen } from './open.js';
 import { buildStatus, formatStatus, formatStatusJson } from './status.js';
+import { formatCadence, formatCadenceJson, runCadence, type CadenceFlags } from './cadence.js';
 import { formatGraphResult, runGraphBuildAll, runGraphBuildOne } from './graph.js';
 import { formatCurate, readlinePrompter, runCurate } from './curate.js';
 import { compact } from '../writeback/index.js';
@@ -48,6 +49,7 @@ Commands:
   open    <account:message-id>  Print the provider web URL for a message (no fetch)
   graph   build                 Build the contact graph (centrality + communities)
   compact [--account <label>]   Demote summarized bulk bodies to summary-only (ADR-0003)
+  cadence --account <label>     Inbound frequency per sender brand (optionally --category)
   status                        Show per-account index freshness + counts
 
 Run 'mail-index <command> --help' for command-specific options.
@@ -197,6 +199,23 @@ Usage:
 
 Options:
   --json   Emit a machine-readable JSON report (for tray/scheduler use)
+`;
+
+const CADENCE_USAGE = `mail-index cadence — inbound frequency per sender brand
+
+Groups received mail by registrable (brand) domain and reports volume, distinct
+senders, first/last seen, and messages-per-month. Optionally restrict to one
+agent-assigned entity category (e.g. a vertical you tagged via save_domain_category).
+
+Usage:
+  mail-index cadence --account <label> [--category <c>] [--since <30d|1mo|ISO>] [--limit N] [--json]
+
+Options:
+  --account <label>   Account to report (required unless only one is configured)
+  --category <c>      Only senders whose domain carries this entity category
+  --since <token>     Only mail on/after this point (e.g. 30d, 1mo, or ISO-8601)
+  --limit N           Cap to the top-N brands by volume
+  --json              Emit a machine-readable JSON report
 `;
 
 /** Parse a `--limit`-style integer flag, throwing a CLI error on bad input. */
@@ -691,6 +710,58 @@ function cmdStatus(argv: string[]): number {
   }
 }
 
+function cmdCadence(argv: string[]): number {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      account: { type: 'string' },
+      category: { type: 'string' },
+      since: { type: 'string' },
+      limit: { type: 'string' },
+      json: { type: 'boolean' },
+      help: { type: 'boolean' },
+    },
+    allowPositionals: false,
+  });
+
+  if (values.help) {
+    process.stdout.write(CADENCE_USAGE);
+    return 0;
+  }
+
+  // INDEX-ONLY (PLAN §4): cadence needs only the account LABEL; loadConfig is
+  // the source of truth for which accounts exist (and the sole-account default).
+  const config = loadConfig();
+  const labels = Object.keys(config.accounts);
+  let account = values.account;
+  if (account == null) {
+    if (labels.length === 1) {
+      account = labels[0]!;
+    } else if (labels.length === 0) {
+      throw new CliError('no accounts configured — run mail-index init and edit the config');
+    } else {
+      throw new CliError(`cadence requires --account <label> (configured: ${labels.join(', ')})`);
+    }
+  }
+
+  const flags: CadenceFlags = {
+    account,
+    category: values.category,
+    since: values.since,
+    limit: parseLimit(values.limit, '--limit'),
+  };
+
+  const db = openDb();
+  try {
+    const repo = new Repo(db);
+    const rows = runCadence(repo, flags);
+    process.stdout.write(values.json ? formatCadenceJson(rows) : formatCadence(rows, flags));
+    return 0;
+  } finally {
+    db.close();
+  }
+}
+
 async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
 
@@ -720,6 +791,8 @@ async function main(argv: string[]): Promise<number> {
       return cmdGraph(rest);
     case 'compact':
       return cmdCompact(rest);
+    case 'cadence':
+      return cmdCadence(rest);
     case 'status':
       return cmdStatus(rest);
     default:

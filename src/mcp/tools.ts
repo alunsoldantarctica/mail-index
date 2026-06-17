@@ -48,6 +48,7 @@ import type { Curation } from '../index/schema.js';
 import { CURATIONS } from '../index/schema.js';
 import { enrichOne } from '../ingest/enrich.js';
 import { isLikelyImageOnly } from '../intelligence/images.js';
+import { computeCadence, type CadenceRow } from '../intelligence/cadence.js';
 import { buildFtsQuery } from '../cli/search.js';
 import { propose, set as curationSet, get as curationGet } from '../curation/index.js';
 import {
@@ -755,6 +756,35 @@ export function saveDomainCategoryTool(
   const account = requireAccount(ctx, args.account, 'save_domain_category');
   const result = wbSaveDomainCategory(ctx.repo, account, args.domain, args.category, args.note ?? null);
   return withMeta(ctx.repo, account, { result });
+}
+
+// ---- cadence (deterministic correspondent frequency) ----------------------
+
+export interface CadenceArgs {
+  account?: string;
+  /** Restrict to senders whose domain carries this agent-assigned entity category. */
+  category?: string;
+  /** Relative token (`30d`, `1mo`) or ISO timestamp lower bound. */
+  since?: string;
+  limit?: number;
+}
+
+/**
+ * `cadence` — inbound frequency per registrable (brand) domain (PLAN §12). The
+ * deterministic answer to "how often does <brand / category> email me": no
+ * ad-hoc SQL, no per-query classification. Pair with `save_domain_category` to
+ * tag a vertical once, then pass `category` here to scope to it (e.g. every
+ * expedition operator's cadence in one call).
+ */
+export function cadenceTool(ctx: ToolContext, args: CadenceArgs): WithMeta & { cadence: CadenceRow[] } {
+  const account = requireAccount(ctx, args.account, 'cadence');
+  const now = ctx.now ? ctx.now() : new Date();
+  const opts: Parameters<typeof computeCadence>[2] = {};
+  if (args.category != null) opts.category = args.category;
+  if (args.since != null) opts.sinceMs = parseSince(args.since, now);
+  if (args.limit != null) opts.limit = args.limit;
+  const cadence = computeCadence(ctx.repo, account, opts);
+  return withMeta(ctx.repo, account, { cadence });
 }
 
 // ---- sync status (PLAN §12, ADR-0005) -------------------------------------
