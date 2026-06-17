@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>mail-index — present</title>
+<!--
+  Lightweight presenter wrapper around index.html. Full-bleed iframe + on-screen
+  prev/next arrows + a fullscreen toggle, for presenting without a keyboard.
+  Arrow keys still work; the buttons just forward ArrowLeft/ArrowRight into the
+  deck. Must be SERVED (the deck embeds same-origin demo iframes) — use serve.sh.
+-->
+<style>
+  :root { --accent:#4ADE80; --ink:#E8F0E6; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html, body { height:100%; background:#0C0E0C; overflow:hidden; }
+  #deck { position:fixed; inset:0; width:100%; height:100%; border:0; background:#0C0E0C; }
+
+  /* control layer — fades out when idle */
+  #controls { position:fixed; inset:0; z-index:10; pointer-events:none;
+              opacity:1; transition:opacity .4s ease; font-family:"JetBrains Mono",ui-monospace,monospace; }
+  #controls.idle { opacity:0; }
+
+  .nav { position:fixed; top:50%; transform:translateY(-50%); pointer-events:auto;
+         width:74px; height:74px; border-radius:50%; cursor:pointer;
+         display:grid; place-items:center; border:1px solid rgba(232,240,230,.22);
+         background:rgba(12,14,12,.42); color:var(--ink); backdrop-filter:blur(6px);
+         transition:background .2s, border-color .2s, transform .2s; user-select:none; }
+  .nav:hover { background:rgba(74,222,128,.18); border-color:var(--accent); color:#fff; }
+  .nav:active { transform:translateY(-50%) scale(.92); }
+  .nav svg { width:30px; height:30px; }
+  #prev { left:26px; } #next { right:26px; }
+
+  #fs { position:fixed; top:24px; right:24px; pointer-events:auto; cursor:pointer;
+        display:flex; align-items:center; gap:9px; padding:9px 14px; border-radius:8px;
+        border:1px solid rgba(232,240,230,.22); background:rgba(12,14,12,.42); color:var(--ink);
+        backdrop-filter:blur(6px); font-size:12px; letter-spacing:.12em; text-transform:uppercase;
+        font-weight:600; transition:background .2s, border-color .2s; }
+  #fs:hover { background:rgba(74,222,128,.18); border-color:var(--accent); color:#fff; }
+  #fs svg { width:15px; height:15px; }
+
+  #hint { position:fixed; left:50%; bottom:22px; transform:translateX(-50%); pointer-events:none;
+          font-size:11.5px; letter-spacing:.14em; text-transform:uppercase; color:rgba(232,240,230,.45); }
+</style>
+</head>
+<body>
+  <iframe id="deck" src="index.html" title="mail-index deck" allow="fullscreen"></iframe>
+
+  <div id="controls">
+    <div class="nav" id="prev" title="Previous (←)" aria-label="Previous slide">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+    </div>
+    <div class="nav" id="next" title="Next (→)" aria-label="Next slide">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+    </div>
+    <div id="fs" title="Toggle fullscreen (F)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M16 21h3a2 2 0 0 0 2-2v-3M8 21H5a2 2 0 0 1-2-2v-3"/></svg>
+      <span id="fslabel">Fullscreen</span>
+    </div>
+    <div id="hint">← / →  navigate · F  fullscreen · O  overview</div>
+  </div>
+
+<script>
+(function () {
+  const deck = document.getElementById('deck');
+  const controls = document.getElementById('controls');
+
+  // Drive the deck by forwarding key events into its window (same-origin once served).
+  function sendKey(key) {
+    try { deck.contentWindow.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })); }
+    catch (e) { /* cross-origin (opened from file://) — serve it instead */ }
+    deck.focus();
+  }
+  document.getElementById('prev').onclick = () => sendKey('ArrowLeft');
+  document.getElementById('next').onclick = () => sendKey('ArrowRight');
+
+  // Fullscreen toggle (whole presenter).
+  const fsLabel = document.getElementById('fslabel');
+  function toggleFs() {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen?.();
+  }
+  document.getElementById('fs').onclick = toggleFs;
+  document.addEventListener('fullscreenchange', () => {
+    fsLabel.textContent = document.fullscreenElement ? 'Exit' : 'Fullscreen';
+  });
+
+  // Our own keyboard: forward arrows/overview to the deck, F for fullscreen.
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFs(); }
+    else if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' ','o','O','PageUp','PageDown','Escape'].includes(e.key)) {
+      sendKey(e.key);
+    }
+  });
+
+  // Auto-hide controls when the pointer is idle.
+  let idleTimer;
+  function poke() {
+    controls.classList.remove('idle');
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => controls.classList.add('idle'), 2600);
+  }
+  window.addEventListener('mousemove', poke);
+  window.addEventListener('keydown', poke);
+  poke();
+})();
+</script>
+</body>
+</html>

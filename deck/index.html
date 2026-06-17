@@ -167,8 +167,9 @@
   /* Trust station */
   #s9 .pillars { display: flex; flex-direction: column; gap: 28px; margin-top: 52px; max-width: 1620px; }
   #s9 .pillars .p { display: flex; align-items: baseline; gap: 24px; font-size: 44px; font-weight: 700; }
-  #s9 .pillars .p .mark { color: #16a34a; font-weight: 800; }
-  #s9 .pillars .p .sub { font-size: 32px; font-weight: 500; opacity: .85; }
+  #s9 .pillars .p .mark { color: #16a34a; font-weight: 800; flex: 0 0 auto; }
+  #s9 .pillars .p b { font-weight: 800; white-space: nowrap; flex: 0 0 auto; }
+  #s9 .pillars .p .sub { font-size: 32px; font-weight: 500; opacity: .85; flex: 1 1 auto; min-width: 0; }
 
   /* Install station — terminal code block */
   #s10 .term { margin-top: 50px; max-width: 1620px; background: #0f261a;
@@ -279,9 +280,9 @@
       <div class="eyebrow" data-fade>Trust posture</div>
       <h2 class="display" data-split="lines">Your mail never<br>leaves your machine.</h2>
       <div class="pillars">
-        <div class="p" data-fade><span class="mark">▸</span> Local-first <span class="sub">— the index lives on your disk, nowhere else</span></div>
-        <div class="p" data-fade><span class="mark">▸</span> Read-only <span class="sub">— it never sends or mutates your mail</span></div>
-        <div class="p" data-fade><span class="mark">▸</span> No telemetry <span class="sub">— the local-only promise is enforced in CI by an egress-guard test</span></div>
+        <div class="p" data-fade><span class="mark">▸</span> <b>Local-first</b> <span class="sub">— the index lives on your disk, nowhere else</span></div>
+        <div class="p" data-fade><span class="mark">▸</span> <b>Read-only</b> <span class="sub">— it never sends or mutates your mail</span></div>
+        <div class="p" data-fade><span class="mark">▸</span> <b>No&nbsp;telemetry</b> <span class="sub">— the local-only promise is enforced in CI by an egress-guard test</span></div>
       </div>
     </section>
 
@@ -299,14 +300,14 @@
     </section>
 
     <!-- 11 · CLOSE (light) -->
-    <section class="station invert" id="s11" data-name="Built by Unsold" data-x="11500" data-y="7250">
+    <section class="station invert" id="s11" data-name="Built by Unsold.group" data-x="11500" data-y="7250">
       <div class="eyebrow" data-fade>Built for the AI-native business</div>
       <h2 class="display sm" data-split="lines">Real, queryable context —<br>without handing over<br>the keys.</h2>
       <div class="askclaude" data-fade>
         <div class="ask-label">▸ Or just ask your Claude</div>
         <div class="ask-prompt">"Install <span class="accent">mail-index</span> for me — it's an MCP server on npm. Add it to my Claude and set it up read-only on my Gmail."</div>
       </div>
-      <div class="credits" data-fade>Built by Unsold Group · MIT licensed · npmjs.com/package/mail-index · unsold.group/al</div>
+      <div class="credits" data-fade>Built by Unsold.group · MIT licensed · npmjs.com/package/mail-index · unsold.group/al</div>
     </section>
 
   </div>
@@ -432,30 +433,41 @@
   function playDemo(s) {
     const f = s.el.querySelector('.site-frame');
     if (!f) return;
-    // data-fit="fill" demos get enlarged + vertically centered on load (same-origin).
-    f.onload = (s.el.dataset.fit === 'fill')
-      ? () => { fitDemo(f); setTimeout(() => fitDemo(f), 1200); }
-      : null;
+    f.__ro = null;   // fresh load → drop any stale ResizeObserver
+    // Contain-fit EVERY embedded demo into the 1920×1080 frame (same-origin),
+    // re-fitting a few times as the demo's own animation changes its height.
+    f.onload = () => { fitDemo(f); [400, 1200, 2800, 5200].forEach(t => setTimeout(() => fitDemo(f), t)); };
     f.src = s.el.dataset.demo;            // (re)assigning src reloads → run() replays
   }
-  // Same-origin only: zoom the embedded demo so its content fills the slide height
-  // and sits centered. Cross-origin access throws → caught, leaving the demo as-is.
+  // Same-origin only: size the iframe to the demo's natural content box, then
+  // CSS-scale it to CONTAIN within the 1920×1080 frame (whole demo always visible,
+  // centered, never cropped) at any deck aspect ratio. Cross-origin access throws
+  // (e.g. opened from file://) → caught, leaving the demo as-is.
   function fitDemo(f) {
     try {
       const d = f.contentDocument || f.contentWindow.document;
       if (!d || !d.body) return;
       let st = d.getElementById('__deckfit');
       if (!st) { st = d.createElement('style'); st.id = '__deckfit'; (d.head || d.documentElement).appendChild(st); }
-      st.textContent = 'html,body{height:100%!important;margin:0!important}' +
-        'body{min-height:100vh!important;display:grid!important;place-items:center!important;' +
-        'padding:18px!important;overflow:hidden!important}';
-      d.documentElement.style.zoom = '1';
+      // Strip the demo's own full-viewport centering so it lays out at natural size.
+      st.textContent = 'html,body{margin:0!important;padding:0!important;min-height:0!important;' +
+        'height:auto!important;display:block!important;overflow:visible!important}';
       const el = d.querySelector('.stage, .card') || d.body;
-      const r = el.getBoundingClientRect();
-      if (r.height > 0) {
-        const k = Math.min((1080 * 0.94) / r.height, (1920 * 0.96) / r.width);
-        if (k > 1.02) d.documentElement.style.zoom = Math.min(k, 2.6).toFixed(3);
-      }
+      const apply = () => {
+        const pad = 30;
+        const cw = el.scrollWidth + pad * 2, ch = el.scrollHeight + pad * 2;
+        if (cw < 10 || ch < 10) return;
+        const k = Math.min(1920 / cw, 1080 / ch);
+        f.style.width = cw + 'px'; f.style.height = ch + 'px';
+        f.style.transformOrigin = 'top left';
+        f.style.left = ((1920 - cw * k) / 2) + 'px';
+        f.style.top = ((1080 - ch * k) / 2) + 'px';
+        f.style.transform = 'scale(' + k.toFixed(4) + ')';
+      };
+      apply();
+      // Re-fit live for demos whose content height changes (e.g. the chat answer typing in).
+      const RO = f.contentWindow.ResizeObserver;
+      if (RO && !f.__ro) { f.__ro = new RO(apply); f.__ro.observe(el); }
     } catch (e) {}
   }
 
