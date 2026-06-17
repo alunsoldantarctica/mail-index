@@ -21,6 +21,7 @@
 
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
 import { IndexError } from './db.js';
+import { bm25Expr, projectBody, projectRecipients } from './fts.js';
 import {
   BODY_STATES,
   BODY_STATE_RANK,
@@ -560,7 +561,7 @@ export class Repo {
       this.#syncFts(rowid, {
         subject: input.subject ?? null,
         sender: input.fromAddr ?? null,
-        recipients: [input.toAddr, input.ccAddr].filter(Boolean).join(' ') || null,
+        recipients: projectRecipients(input.toAddr ?? null, input.ccAddr ?? null),
         snippet: input.snippet ?? null,
         bodyText: effectiveState === 'full' ? effectiveBody : null,
         // Preserve any agent-written summary in the FTS body across a re-sync
@@ -671,13 +672,10 @@ export class Repo {
       summary?: string | null;
     },
   ): void {
-    // FTS body column = snippet + distilled body (when full) + summary (when
-    // present). Across the ladder this means: meta indexes the snippet; full
-    // indexes snippet + distilled body; summary-only indexes snippet + summary
-    // (the demoted body is gone). A summary present on a `full` row is additive
-    // (ADR-0003), so both body and summary feed FTS there.
-    const body =
-      [fields.snippet, fields.bodyText, fields.summary].filter(Boolean).join('\n') || null;
+    // The FTS `body` projection across the Body-state ladder is the FTS contract
+    // (src/index/fts.ts) — single-sourced so index-time and query-time, and any
+    // future index rebuild, can never disagree on what got indexed.
+    const body = projectBody(fields);
     this.#prepare(`DELETE FROM messages_fts WHERE rowid = ?`).run(rowid);
     this.#prepare(
       `INSERT INTO messages_fts(rowid, subject, sender, recipients, body)
@@ -727,7 +725,7 @@ export class Repo {
          FROM messages_fts f
          JOIN messages m ON m.rowid = f.rowid
         WHERE messages_fts MATCH ? ${accountClause}
-        ORDER BY bm25(messages_fts)
+        ORDER BY ${bm25Expr()}
         LIMIT ?`,
     );
     const rows = opts.account

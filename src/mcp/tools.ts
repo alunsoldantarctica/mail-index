@@ -49,7 +49,7 @@ import { CURATIONS } from '../index/schema.js';
 import { enrichOne } from '../ingest/enrich.js';
 import { isLikelyImageOnly } from '../intelligence/images.js';
 import { computeCadence, type CadenceRow } from '../intelligence/cadence.js';
-import { buildFtsQuery } from '../cli/search.js';
+import { buildMatch } from '../index/fts.js';
 import { propose, set as curationSet, get as curationGet } from '../curation/index.js';
 import {
   saveSummary,
@@ -290,14 +290,14 @@ export interface SearchArgs {
 
 /**
  * `search` — ranked FTS recall, snippet-first (PLAN §12, DESIGN TEST recall).
- * Fuzzy: each term is a prefix-matched, OR-combined FTS literal (shared with the
- * CLI's {@link buildFtsQuery}), so a half-remembered detail still surfaces
- * neighbours rather than nothing. Never dumps bodies — the agent opts in per hit
- * via `get_message`.
+ * Fuzzy: each term is a prefix-matched, OR-combined FTS literal (the FTS
+ * contract's {@link buildMatch}, shared with the CLI), so a half-remembered
+ * detail still surfaces neighbours rather than nothing. Never dumps bodies — the
+ * agent opts in per hit via `get_message`.
  */
 export function search(ctx: ToolContext, args: SearchArgs): WithMeta & { hits: HitShape[] } {
   const terms = args.query.split(/\s+/).filter((t) => t !== '');
-  const q = buildFtsQuery(terms);
+  const q = buildMatch(terms, { expand: true });
   const rows = q === '' ? [] : ctx.repo.searchMessages(q, {
     ...(args.account ? { account: args.account } : {}),
     limit: args.limit ?? 15,
@@ -565,7 +565,7 @@ export function listThreads(
     }
     rows = account ? ctx.repo.threadsForContact(account, args.contact, args.limit ?? 20) : [];
   } else if (args.query) {
-    const q = buildFtsQuery(args.query.split(/\s+/).filter((t) => t !== ''));
+    const q = buildMatch(args.query.split(/\s+/).filter((t) => t !== ''));
     rows = q === '' ? [] : ctx.repo.threadsForQuery(q, {
       ...(args.account ? { account: args.account } : {}),
       limit: args.limit ?? 20,

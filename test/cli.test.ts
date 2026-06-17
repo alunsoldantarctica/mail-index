@@ -1,9 +1,9 @@
 /**
  * CLI tests (SCOPE 0.7, PLAN §13). Two layers:
  *
- *  - Unit: the pure helpers each command module exposes (scope composition, FTS
- *    query building, hit formatting, status assembly) — no process, no DB I/O
- *    beyond an in-memory index.
+ *  - Unit: the pure helpers each command module exposes (scope composition, hit
+ *    formatting, status assembly) — no process, no DB I/O beyond an in-memory
+ *    index. The FTS MATCH builder now lives in the FTS contract (fts.test.ts).
  *  - Smoke: the built `dist/cli/index.js` bin parsing args end-to-end, including
  *    a `search` over a seeded tmp database (exercising arg routing + output).
  *
@@ -20,7 +20,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { composeScope, buildSource } from '../dist/cli/sync.js';
-import { buildFtsQuery, runSearch, formatHit, formatResults, messageRef } from '../dist/cli/search.js';
+import { runSearch, formatHit, formatResults, messageRef } from '../dist/cli/search.js';
 import { buildStatus, formatStatus, formatStatusJson } from '../dist/cli/status.js';
 import { runInit, formatInit } from '../dist/cli/init.js';
 import { openDb } from '../dist/index/db.js';
@@ -77,21 +77,6 @@ test('buildSource builds a gws adapter (expanding ~ in configDir)', () => {
 });
 
 // ---- search helpers ------------------------------------------------------
-
-test('buildFtsQuery quotes terms, prefixes, and OR-combines', () => {
-  assert.equal(buildFtsQuery(['deposit', 'antarctica']), '"deposit"* OR "antarctica"*');
-});
-
-test('buildFtsQuery escapes embedded quotes and drops blanks', () => {
-  assert.equal(buildFtsQuery(['  ', 'a"b']), '"a""b"*');
-});
-
-test('buildFtsQuery handles FTS operator characters safely', () => {
-  // Bare `OR`/punctuation as a literal term must not break the query — it is
-  // quoted, so FTS5 treats it as a string, not an operator.
-  const q = buildFtsQuery(['OR', 'a-b']);
-  assert.equal(q, '"OR"* OR "a-b"*');
-});
 
 function seedRepo(repo: Repo): void {
   repo.upsertMessage({

@@ -13,6 +13,7 @@
  */
 
 import { resolveAccount, type AccountConfig, type OperatorConfig } from '../config/index.js';
+import { buildMatch } from '../index/fts.js';
 import { Repo, type MessageRow } from '../index/repo.js';
 import type { MailSource } from '../source/index.js';
 import { enrichOne } from '../ingest/enrich.js';
@@ -27,26 +28,9 @@ export interface SearchFlags {
   enrich?: boolean;
 }
 
-/**
- * Turn free-text search terms into a safe FTS5 MATCH expression. Each term is
- * wrapped in double quotes (FTS5 string literal) so user input with FTS
- * operators, punctuation, or reserved words cannot break the query or trigger a
- * syntax error; a trailing `*` makes each term a prefix match for fuzzier
- * recall. Terms are OR-combined so a partial overlap still surfaces neighbours
- * rather than an empty set.
- */
-export function buildFtsQuery(terms: readonly string[]): string {
-  const cleaned = terms
-    .map((t) => t.trim())
-    .filter((t) => t !== '')
-    // Escape embedded double quotes per FTS5 string-literal rules ("" = ").
-    .map((t) => `"${t.replace(/"/g, '""')}"*`);
-  return cleaned.join(' OR ');
-}
-
 /** Run a search, returning ranked rows (best first). */
 export function runSearch(repo: Repo, terms: readonly string[], flags: SearchFlags): MessageRow[] {
-  const query = buildFtsQuery(terms);
+  const query = buildMatch(terms, { expand: true });
   if (query === '') return [];
   return repo.searchMessages(query, { account: flags.account, limit: flags.limit ?? 20 });
 }
