@@ -51,7 +51,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "bundle": "tsc && npx -y @anthropic-ai/mcpb pack . mail-index.mcpb"
+    "bundle": "tsc && node scripts/bundle.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",

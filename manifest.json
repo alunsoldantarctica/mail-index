@@ -17,8 +17,8 @@
     "type": "node",
     "entry_point": "dist/mcp/index.js",
     "mcp_config": {
-      "command": "npx",
-      "args": ["-y", "-p", "mail-index", "mail-index-mcp"]
+      "command": "node",
+      "args": ["${__dirname}/dist/mcp/index.js"]
     }
   },
   "tools": [
