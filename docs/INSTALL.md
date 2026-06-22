@@ -267,16 +267,32 @@ or its tools have nothing to read.
   ```
   (add `--scope project` to share it via a committed `.mcp.json`; or use
   `-- mail-index-mcp` directly if it's on your PATH).
+  **Windows:** MCP clients spawn the command without a shell, and `npx` is
+  `npx.cmd` (a batch file) that Windows can't launch directly (`spawn npx
+  ENOENT`). Wrap it in `cmd /c`:
+  ```sh
+  claude mcp add --transport stdio mail-index -- cmd /c npx -y -p mail-index mail-index-mcp
+  ```
 - **Any MCP client — manual config:**
   ```jsonc
   { "mcpServers": { "mail-index": { "command": "mail-index-mcp" } } }
   ```
+  **Windows:** the global bin is `mail-index-mcp.cmd`, which won't spawn
+  directly either — wrap it, or point at Node + the built entry:
+  ```jsonc
+  { "mcpServers": { "mail-index": { "command": "cmd", "args": ["/c", "mail-index-mcp"] } } }
+  // …or, if you cloned the repo:
+  { "mcpServers": { "mail-index": { "command": "node", "args": ["C:\\path\\to\\mail-index\\dist\\mcp\\index.js"] } } }
+  ```
 - **Claude Desktop:** download the
   [`.mcpb` bundle](https://github.com/alunsoldantarctica/mail-index/releases/latest/download/mail-index.mcpb)
-  and double-click it (unsigned during beta — allow it in System Settings if
-  prompted). Still in progress: a *signed* all-in-one DMG/MSI installer that
-  *also* does the local setup (adapter + sign-in + sync). There is no
-  `claude://` install link.
+  and double-click it (unsigned during beta — allow it in System Settings /
+  Windows SmartScreen if prompted). The bundle is **self-contained** — it ships
+  its own `dist` + dependencies and is run by Claude Desktop's bundled Node, so
+  it needs **no** npx, network, or system Node and installs identically on
+  Windows/macOS/Linux. Still in progress: a *signed* all-in-one DMG/MSI
+  installer that *also* does the local setup (adapter + sign-in + sync). There
+  is no `claude://` install link.
 
 **Desktop apps launch with a minimal environment** — two practical notes if the
 server fails to start or `get_message` can't enrich:
@@ -285,12 +301,23 @@ server fails to start or `get_message` can't enrich:
   be on the app's `PATH`. Point `command` at an absolute Node binary and the
   built entrypoint instead:
   ```jsonc
+  // macOS / Linux
   {
     "mcpServers": {
       "mail-index": {
         "command": "/abs/path/to/node",
         "args": ["/abs/path/to/mail-index/dist/mcp/index.js"],
         "env": { "PATH": "/dir/with/your/adapter/bin:/usr/local/bin:/usr/bin:/bin" }
+      }
+    }
+  }
+  // Windows (note the doubled backslashes and `;`-separated PATH)
+  {
+    "mcpServers": {
+      "mail-index": {
+        "command": "C:\\Program Files\\nodejs\\node.exe",
+        "args": ["C:\\path\\to\\mail-index\\dist\\mcp\\index.js"],
+        "env": { "PATH": "C:\\dir\\with\\adapter;C:\\Program Files\\nodejs" }
       }
     }
   }

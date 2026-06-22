@@ -1,6 +1,6 @@
 {
   "name": "mail-index",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "mcpName": "io.github.alunsoldantarctica/mail-index",
   "description": "A local, agent-queryable mail intelligence layer — progressive mailbox index + MCP server for AI agents.",
   "type": "module",
@@ -51,7 +51,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "bundle": "tsc && npx -y @anthropic-ai/mcpb pack . mail-index.mcpb"
+    "bundle": "tsc && node scripts/bundle.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",

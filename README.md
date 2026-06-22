@@ -91,14 +91,19 @@ first (see the walkthrough). A `.mcpb`/`claude mcp add` only **adds the server**
 it doesn't install the adapter, sign you in, or sync.
 
 - **Claude Code:** `claude mcp add --transport stdio mail-index -- npx -y -p mail-index mail-index-mcp`
+  (on **Windows**, prefix with `cmd /c`: `… -- cmd /c npx -y -p mail-index mail-index-mcp` —
+  bare `npx`/`.cmd` won't spawn. See [docs/INSTALL.md §7](docs/INSTALL.md).)
 - **Any MCP client (manual):**
   ```jsonc
   { "mcpServers": { "mail-index": { "command": "mail-index-mcp" } } }
   ```
 - **Claude Desktop:** download the **[`.mcpb` bundle](https://github.com/alunsoldantarctica/mail-index/releases/latest/download/mail-index.mcpb)**
   and double-click it (unsigned during beta — you may need to allow it in System
-  Settings). A signed all-in-one installer that *also* installs the adapter, signs
-  you in, and syncs is still in progress; there is no `claude://` install link.
+  Settings / Windows SmartScreen). The bundle is **self-contained** (ships its own
+  dependencies, run by Claude Desktop's bundled Node — no npx, network, or system
+  Node needed) so it installs identically on Windows/macOS/Linux. A signed
+  all-in-one installer that *also* installs the adapter, signs you in, and syncs is
+  still in progress; there is no `claude://` install link.
 
 **Teach your agent the common moves.** The MCP server already tells the agent
 *when* to reach for it (purchases, receipts, bookings, "who said what", "catch me
