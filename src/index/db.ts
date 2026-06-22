@@ -58,20 +58,24 @@ function linkedWorktreeRoot(): string | null {
  * Resolve the default index path. Precedence:
  *
  *  1. `MAIL_INDEX_DB` — an explicit DB file path (always wins; the manual seam).
- *  2. A linked git worktree → `<worktree>/.mail-index-dev.sqlite`, so dev builds
+ *  2. `XDG_DATA_HOME` (when set) → `${XDG_DATA_HOME}/mail-index/mail.sqlite`.
+ *     An explicitly-set data dir is deliberate caller intent and outranks the
+ *     auto-isolation below — without this, worktree isolation would silently
+ *     ignore a caller's chosen data dir (e.g. a test pointing at a tmp dir).
+ *  3. A linked git worktree → `<worktree>/.mail-index-dev.sqlite`, so dev builds
  *     auto-isolate from the production index without anyone setting env (see
- *     {@link linkedWorktreeRoot}).
- *  3. `${XDG_DATA_HOME:-~/.local/share}/mail-index/mail.sqlite` — the shared
- *     production default (installed CLI/MCP + the canonical checkout).
+ *     {@link linkedWorktreeRoot}). Only fires when neither env above is set.
+ *  4. `~/.local/share/mail-index/mail.sqlite` — the shared production default
+ *     (installed CLI/MCP + the canonical checkout).
  */
 export function defaultDbPath(): string {
   const explicit = process.env['MAIL_INDEX_DB'];
   if (explicit && explicit.trim() !== '') return explicit;
+  const xdg = process.env['XDG_DATA_HOME'];
+  if (xdg && xdg.trim() !== '') return join(xdg, 'mail-index', 'mail.sqlite');
   const wt = linkedWorktreeRoot();
   if (wt) return join(wt, '.mail-index-dev.sqlite');
-  const xdg = process.env['XDG_DATA_HOME'];
-  const base = xdg && xdg.trim() !== '' ? xdg : join(homedir(), '.local', 'share');
-  return join(base, 'mail-index', 'mail.sqlite');
+  return join(homedir(), '.local', 'share', 'mail-index', 'mail.sqlite');
 }
 
 /**
