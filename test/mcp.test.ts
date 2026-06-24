@@ -15,7 +15,7 @@
  *    set, when an exact key misses (recall);
  *  - a STALE catch_up returns current data + sync_started + eta_seconds and a
  *    body command handback, spawning a (spied) detached sync (ADR-0005);
- *  - the 16-tool surface is advertised and every advertised tool dispatches.
+ *  - the full tool surface is advertised and every advertised tool dispatches.
  *
  * Tests import the compiled output; `pnpm test` builds first via pretest.
  */
@@ -31,6 +31,8 @@ import { buildGraph } from '../dist/graph/index.js';
 import { set as curationSet } from '../dist/curation/index.js';
 import {
   search,
+  listLabeled,
+  refreshInbox,
   getMessage,
   getThread,
   listContacts,
@@ -228,6 +230,84 @@ test('get_message: level body performs the ONE O(1) inline enrich (ADR-0001)', a
   // A second body call is a no-op (already full) — no re-enrich.
   const again = await getMessage(ctx, { ref: `${ACCOUNT}:m3`, level: 'body' });
   assert.equal(again.enriched, false);
+});
+
+/** Seed a message straight into the index with explicit Gmail labels. */
+function seedLabeled(repo, id, labels) {
+  repo.upsertMessage({
+    account: ACCOUNT,
+    gmailMessageId: id,
+    subject: `subject ${id}`,
+    fromAddr: 'a@b.com',
+    internalDate: T,
+    labels,
+    category: labels.includes('INBOX') ? 'primary' : null,
+    bodyState: 'meta',
+  });
+}
+
+/** A MailSource whose live inbox is `liveIds`; getMetadata serves any `metaById`. */
+function inboxSourceFactory(liveIds, metaById = {}) {
+  return () => ({
+    provider: 'fake',
+    check: async () => ({ ok: true, address: ME }),
+    async *listIds() {
+      for (const id of liveIds) yield id;
+    },
+    async getMetadata(ids) {
+      return ids.map((id) => metaById[id]).filter((m) => m != null);
+    },
+    async getFull() {
+      return null;
+    },
+  });
+}
+
+test('list_labeled: filters by stored label membership, never dumps bodies', () => {
+  const repo = freshRepo();
+  seedLabeled(repo, 'in1', ['INBOX']);
+  seedLabeled(repo, 'in2', ['INBOX', 'UNREAD']);
+  seedLabeled(repo, 'arch', ['CATEGORY_PROMOTIONS']);
+
+  const res = listLabeled(ctxFor(repo), { label: 'INBOX' });
+  assert.deepEqual(new Set(res.hits.map((h) => h.ref)), new Set([`${ACCOUNT}:in1`, `${ACCOUNT}:in2`]));
+  assert.ok(res.hits.every((h) => !('body' in h)), 'snippet-first, no body');
+  assert.ok(res.hits.some((h) => h.labels.includes('INBOX')), 'labels exposed on hits');
+});
+
+test('refresh_inbox: reconciles live membership, then returns the current inbox', async () => {
+  const repo = freshRepo();
+  seedLabeled(repo, 'keep', ['INBOX']);
+  seedLabeled(repo, 'archived', ['INBOX']); // will fall out of the live inbox
+  const ctx = ctxFor(repo, { buildSource: inboxSourceFactory(['keep']) });
+
+  const res = await refreshInbox(ctx, {});
+  assert.equal(res.refreshed, true, 'a live reconcile ran');
+  assert.equal(res.archived, 1, 'archived row dropped INBOX');
+  assert.deepEqual(res.hits.map((h) => h.ref), [`${ACCOUNT}:keep`], 'only live inbox returned');
+});
+
+test('refresh_inbox: indexes new inbox mail surfaced by the reconcile', async () => {
+  const repo = freshRepo();
+  const meta = {
+    id: 'fresh', threadId: null, internalDate: T, dateHeader: null,
+    from: 'new@x.com', to: null, cc: null, subject: 'fresh inbox', labels: ['INBOX'],
+    snippet: 'hi', sizeEstimate: 1, headers: {},
+  };
+  const ctx = ctxFor(repo, { buildSource: inboxSourceFactory(['fresh'], { fresh: meta }) });
+
+  const res = await refreshInbox(ctx, {});
+  assert.equal(res.added, 1);
+  assert.ok(res.hits.some((h) => h.ref === `${ACCOUNT}:fresh`), 'newly indexed inbox mail shows');
+});
+
+test('refresh_inbox: degrades to the indexed inbox when no provider creds are wired', async () => {
+  const repo = freshRepo();
+  seedLabeled(repo, 'keep', ['INBOX']);
+  // No buildSource on the ctx → cannot reconcile.
+  const res = await refreshInbox(ctxFor(repo), {});
+  assert.equal(res.refreshed, false, 'no live reconcile, but still answerable');
+  assert.deepEqual(res.hits.map((h) => h.ref), [`${ACCOUNT}:keep`]);
 });
 
 test('get_message: summary level returns summary when present, never raw body by default', async () => {
@@ -474,8 +554,8 @@ test('parseSince: relative tokens and ISO', () => {
 
 test('surface: exactly the PLAN §12 tools are advertised, all with schemas, all dispatch', async () => {
   const expected = [
-    'search', 'get_message', 'get_thread', 'list_contacts', 'get_contact',
-    'find_person', 'list_threads', 'graph_neighbors', 'graph_communities',
+    'search', 'list_labeled', 'refresh_inbox', 'get_message', 'get_thread', 'list_contacts',
+    'get_contact', 'find_person', 'list_threads', 'graph_neighbors', 'graph_communities',
     'interest_propose', 'interest_set', 'interest_get', 'save_summary',
     'domains_to_categorize', 'save_domain_category', 'cadence', 'sync_status',
     'catch_up', 'digest_sources',
@@ -520,10 +600,10 @@ test('setup mode: tools/list advertises exactly the reduced setup surface', () =
   }
 });
 
-test('setup mode: with config present the FULL 19-tool surface is what serve() would use', () => {
+test('setup mode: with config present the FULL 21-tool surface is what serve() would use', () => {
   // The config-present path serves the full surface — assert its size/identity
   // here so the bootstrapping branch never silently shrinks the real surface.
-  assert.equal(TOOLS.length, 19, 'full surface is 19 tools');
+  assert.equal(TOOLS.length, 21, 'full surface is 21 tools');
 });
 
 test('setup_status reports observation and does not crash with no config', () => {

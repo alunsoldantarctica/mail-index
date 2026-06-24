@@ -24,6 +24,8 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 
 import {
   search,
+  listLabeled,
+  refreshInbox,
   getMessage,
   getThread,
   listContacts,
@@ -94,6 +96,24 @@ export const TOOLS: ToolDef[] = [
     ),
     run: (ctx, a) =>
       search(ctx, { query: String(a['query']), ...optStr(a, 'account'), ...optNum(a, 'limit') }),
+  },
+  {
+    name: 'list_labeled',
+    description:
+      'Messages carrying a Gmail label, newest-first (label membership, not full-text). Use label "INBOX" to answer "what is in my inbox right now" — INBOX membership is reconciled on every sync, so it reflects the mailbox now (archived mail is dropped). "UNREAD" answers "what is unread", "STARRED" what is starred; any user label filters to it. Compact, snippet-first like search.',
+    inputSchema: obj(
+      { label: str, account: str, limit: num },
+      ['label'],
+    ),
+    run: (ctx, a) =>
+      listLabeled(ctx, { label: String(a['label']), ...optStr(a, 'account'), ...optNum(a, 'limit') }),
+  },
+  {
+    name: 'refresh_inbox',
+    description:
+      'Answer "what is in my inbox right now" with live-accurate membership. Reconciles INBOX against the live mailbox (archived mail drops, new inbox mail is pulled) THEN returns the current inbox — prefer this over list_labeled INBOX whenever freshness matters. One bounded provider round-trip (inbox-sized); degrades to the indexed inbox (refreshed=false) when no creds are wired.',
+    inputSchema: obj({ account: str, limit: num }),
+    run: (ctx, a) => refreshInbox(ctx, { ...optStr(a, 'account'), ...optNum(a, 'limit') }),
   },
   {
     name: 'get_message',
@@ -368,7 +388,10 @@ export function buildServer(ctx: ToolContext): Server {
         'confirmations, Amazon and other online purchases), bookings, travel, bills ' +
         'and subscriptions; what someone said or agreed; who emailed about X; a ' +
         'contact\'s address or details; newsletters; and "what did I miss / catch me ' +
-        'up". Start with `search` (fuzzy, ranked, snippet-first), `find_person`, or ' +
+        'up". For "what is in my inbox (right now / unread)" use `refresh_inbox` — it ' +
+        'reconciles inbox membership against the live mailbox before returning, so the ' +
+        'answer is current (plain index reads can lag as mail is archived/read). ' +
+        'Start with `search` (fuzzy, ranked, snippet-first), `find_person`, or ' +
         '`catch_up`; the snippet rows already carry sender/subject/date, so only call ' +
         '`get_message` for the few rows you actually need the full body of — do not ' +
         'fetch every result. Local-first and read-only: it never sends or changes ' +
