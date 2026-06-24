@@ -132,9 +132,47 @@ export interface MessageFull extends MessageMetadata {
 }
 
 /**
+ * Thrown by {@link MailSource.modify} when the provider rejects the write for
+ * lack of a mutating scope (the default `gmail.readonly` install). Carries a
+ * ready-to-run `remedy` command so the surface can tell the user exactly how to
+ * opt in. Provider-neutral so CLI and MCP can catch one type across adapters.
+ */
+export class InsufficientScopeError extends Error {
+  override name = 'InsufficientScopeError';
+  /** The provider that rejected the write (e.g. `gog`). */
+  readonly provider: string;
+  /** A shell command the user can run to grant the needed scope. */
+  readonly remedy: string;
+  constructor(provider: string, remedy: string, detail?: string) {
+    super(
+      `${provider}: mailbox write rejected — the current grant is read-only. ` +
+        `Re-authorize with write scope:\n  ${remedy}` +
+        (detail ? `\n(provider said: ${detail})` : ''),
+    );
+    this.provider = provider;
+    this.remedy = remedy;
+  }
+}
+
+/**
+ * A label mutation to apply to one message ({@link MailSource.modify}). Mirrors
+ * the Gmail `messages.modify` body: ids to add and/or remove. Archive is just
+ * `{ removeLabelIds: ['INBOX'] }`. Either field may be omitted/empty.
+ */
+export interface LabelChange {
+  /** Label ids/names to add (e.g. `['STARRED']` or a user label name). */
+  addLabelIds?: string[];
+  /** Label ids/names to remove (e.g. `['INBOX']` to archive). */
+  removeLabelIds?: string[];
+}
+
+/**
  * The provider seam. An adapter implements this; the ingest layer is the only
- * caller. Read-only by contract (CONTEXT.md "Read-only"): no method ever
- * mutates the mailbox.
+ * caller for the read methods. Read-only by contract for everything EXCEPT the
+ * one opt-in mutation seam {@link MailSource.modify} — which is absent on
+ * read-only adapters and only reached through mail-index's explicit, opt-in
+ * archive/label surface (never the sync/enrich path). See
+ * docs/adr/0007-opt-in-mailbox-writes.md.
  *
  * Methods are async — every real adapter is network-bound (the bottleneck per
  * D5). {@link MailSource.listIds} returns an `AsyncIterable` so an adapter can
@@ -168,4 +206,17 @@ export interface MailSource {
 
   /** Fetch the full record (metadata + body) for one id, or null if missing. */
   getFull(id: string): Promise<MessageFull | null>;
+
+  /**
+   * OPT-IN mutation seam (the ONLY method that writes to the mailbox). Apply a
+   * label {@link LabelChange} to message `id`. Absent on read-only adapters, so
+   * callers MUST feature-detect (`typeof source.modify === 'function'`).
+   *
+   * Requires a provider scope that permits modification (for Gmail,
+   * `gmail.modify` — the default `gmail.readonly` install cannot call this and
+   * the adapter surfaces a typed insufficient-scope error). Reached only from
+   * the explicit `mail-index archive`/`label` CLI commands and the
+   * `archive_message`/`modify_labels` MCP tools — never from sync or enrich.
+   */
+  modify?(id: string, change: LabelChange): Promise<void>;
 }

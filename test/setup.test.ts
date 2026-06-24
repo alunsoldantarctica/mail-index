@@ -69,6 +69,27 @@ test('builds the gog auth add command with the read-only Gmail scope', () => {
   ]);
 });
 
+test('--enable-writes adds the least-privilege gmail.modify scope (never send/delete)', () => {
+  const args = authAddArgs(EMAIL, true);
+  assert.deepEqual(args, [
+    'auth', 'add', EMAIL, '--client', 'mail-index', '--services', 'gmail',
+    '--gmail-scope=readonly', '--extra-scopes=https://www.googleapis.com/auth/gmail.modify',
+  ]);
+  // Least-privilege: no full scope, no send/delete.
+  assert.ok(!args.includes('--gmail-scope=full'));
+});
+
+test('--enable-writes re-runs auth on an already-readonly account to upgrade scope', async () => {
+  const configPath = tmpConfig();
+  // The account already shows as authenticated (readonly) in gog auth list.
+  const { deps, calls } = makeDeps({ authList: JSON.stringify([{ email: EMAIL }]) });
+
+  await runSetup({ account: EMAIL, configPath, enableWrites: true, noSync: true }, deps);
+  const authAdd = calls.find((c) => c.cmd === 'gog' && c.args[1] === 'add');
+  assert.ok(authAdd, 'auth add still runs despite the account being authed (scope upgrade)');
+  assert.deepEqual(authAdd.args, authAddArgs(EMAIL, true));
+});
+
 test('accountIsAuthed matches across array/object shapes and is absent-safe', () => {
   assert.equal(accountIsAuthed(JSON.stringify([{ email: EMAIL }]), EMAIL), true);
   assert.equal(accountIsAuthed(JSON.stringify({ accounts: [{ account: EMAIL }] }), EMAIL), true);

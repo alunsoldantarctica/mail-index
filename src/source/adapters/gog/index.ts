@@ -12,6 +12,7 @@
  *  - {@link GogAdapter.listIds}     `gmail messages search <q> --max --page`
  *  - {@link GogAdapter.getMetadata} `gmail raw <id>`                  (lossless Users.Messages.Get)
  *  - {@link GogAdapter.getFull}     `gmail raw <id>`                  (same call; body extracted)
+ *  - {@link GogAdapter.modify}      `gmail messages modify <id> --add/--remove`  (OPT-IN write; needs gmail.modify)
  *
  * §8 pitfall: metadata is fetched with `gmail raw` (the lossless full resource),
  * NOT gog's `--format=metadata --headers <allow-list>` projection — `raw`
@@ -24,7 +25,15 @@
  * distills (CONTEXT.md "Enrichment").
  */
 
-import type { MailScope, MailSource, MessageFull, MessageMetadata, SourceIdentity } from '../../index.js';
+import type {
+  LabelChange,
+  MailScope,
+  MailSource,
+  MessageFull,
+  MessageMetadata,
+  SourceIdentity,
+} from '../../index.js';
+import { InsufficientScopeError } from '../../index.js';
 import {
   type GmailMessage,
   buildGmailQuery,
@@ -178,6 +187,57 @@ export class GogAdapter implements MailSource {
     const { bodyText, bodyHtml, mimeType } = extractBodies(res.payload);
     return { ...toMetadata(res), bodyText, bodyHtml, mimeType };
   }
+
+  /**
+   * OPT-IN write (the one mutating method). Apply a label change to one message
+   * via `gog gmail messages modify <id> --add <csv> --remove <csv>`. gog's
+   * `--gmail-no-send` guard (appended by the runner) blocks *send*, not modify,
+   * so no runner change is needed. A no-op change (nothing to add or remove) is
+   * skipped — gog requires at least one of the flags.
+   *
+   * Requires a `gmail.modify` grant; the default `gmail.readonly` install makes
+   * gog exit with a 403/insufficient-scope error, which we re-throw as a typed
+   * {@link InsufficientScopeError} carrying the exact re-auth command.
+   */
+  async modify(id: string, change: LabelChange): Promise<void> {
+    const add = (change.addLabelIds ?? []).filter((s) => s.trim() !== '');
+    const remove = (change.removeLabelIds ?? []).filter((s) => s.trim() !== '');
+    if (add.length === 0 && remove.length === 0) return;
+
+    const args = ['gmail', 'messages', 'modify', id, '-a', this.#account];
+    if (add.length > 0) args.push('--add', add.join(','));
+    if (remove.length > 0) args.push('--remove', remove.join(','));
+
+    try {
+      await this.#run(args);
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (isInsufficientScope(msg)) {
+        throw new InsufficientScopeError('gog', this.reauthCommand(), msg);
+      }
+      throw err;
+    }
+  }
+
+  /** The exact command to grant gog the least-privilege write (modify) scope. */
+  reauthCommand(): string {
+    return (
+      `gog auth add ${this.#account} --client mail-index --services gmail ` +
+      `--extra-scopes=https://www.googleapis.com/auth/gmail.modify`
+    );
+  }
+}
+
+/**
+ * Heuristic: does a gog/Gmail error message indicate the token lacks a mutating
+ * scope (vs. a transient/other failure)? Gmail returns HTTP 403 with
+ * "Request had insufficient authentication scopes" / "PERMISSION_DENIED"; gog
+ * surfaces that in stderr, which the runner folds into the GogError message.
+ */
+function isInsufficientScope(message: string): boolean {
+  return /\b403\b|insufficient (?:authentication )?scopes?|PERMISSION_DENIED|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(
+    message,
+  );
 }
 
 export { GogError } from './runner.js';

@@ -26,6 +26,7 @@ import { defaultDeps, formatSetup, runSetup, SetupError, type SetupOptions } fro
 import { buildSource, formatSyncResult, runSyncAll, runSyncOne, type SyncFlags } from './sync.js';
 import { formatResults, runSearchEnriching, type SearchFlags } from './search.js';
 import { formatShow, parseRef, runShow, RefError } from './show.js';
+import { archiveChange, formatMutateResult, runLabelChange } from './labels.js';
 import { formatOpen, runOpen } from './open.js';
 import { buildStatus, formatStatus, formatStatusJson } from './status.js';
 import { formatCadence, formatCadenceJson, runCadence, type CadenceFlags } from './cadence.js';
@@ -47,6 +48,8 @@ Commands:
   search  <terms>               Recall over the index (ranked, snippet-first)
   show    <account:message-id>  Print a message's full record (auto-enriches a meta row)
   open    <account:message-id>  Print the provider web URL for a message (no fetch)
+  archive <account:message-id>  Archive a message (drop INBOX) — opt-in write; needs gmail.modify
+  label   <account:message-id>  Add/remove labels (--add / --remove) — opt-in write; needs gmail.modify
   graph   build                 Build the contact graph (centrality + communities)
   compact [--account <label>]   Demote summarized bulk bodies to summary-only (ADR-0003)
   cadence --account <label>     Inbound frequency per sender brand (optionally --category)
@@ -59,7 +62,7 @@ const SETUP_USAGE = `mail-index setup — idempotent onboarding for one account
 
 Usage:
   mail-index setup --account <email> [--adapter gog|gws] [--client <path>]
-                   [--since <30d|1mo>] [--no-sync] [--json]
+                   [--since <30d|1mo>] [--no-sync] [--enable-writes] [--json]
 
 Walks the full install path: detect (and, on macOS, install) the adapter CLI,
 configure a file keyring, place the bundled OAuth client, authenticate the
@@ -73,6 +76,9 @@ Options:
   --client <path>     OAuth client JSON to place (overrides the bundled one)
   --since <token>     Lower bound for the first sync (e.g. 30d, 1mo)
   --no-sync           Configure only; skip the first sync
+  --enable-writes     Opt into archive + label edit: requests the least-privilege
+                      gmail.modify scope (read + write, never send/delete). Re-runs
+                      auth on an already-readonly account to upgrade its grant.
   --json              Emit structured step records (agent/GUI mode); the browser
                       auth step is surfaced as an action rather than blocking
 `;
@@ -155,6 +161,28 @@ Resolves the ref to its provider deep link (Gmail #all view for gws) and prints
 the URL. Does not fetch the message or touch the provider — it only needs the
 account's adapter and the message id, so it works even before the message is
 indexed.
+`;
+
+const ARCHIVE_USAGE = `mail-index archive — archive a message (OPT-IN write)
+
+Usage:
+  mail-index archive <account:message-id>
+
+Removes the INBOX label from the message (Gmail "Archive"). This MUTATES your
+mailbox — it is opt-in and needs a gmail.modify grant. The default read-only
+install will refuse with the exact re-auth command. Enable writes with:
+  mail-index setup --account <email> --enable-writes
+`;
+
+const LABEL_USAGE = `mail-index label — add/remove labels on a message (OPT-IN write)
+
+Usage:
+  mail-index label <account:message-id> [--add <label>]... [--remove <label>]...
+
+Adds and/or removes Gmail labels (system ids like STARRED/UNREAD, or existing
+user-label names; --add and --remove each repeatable). This MUTATES your mailbox
+— opt-in, needs a gmail.modify grant. Creating new labels is not supported.
+Enable writes with: mail-index setup --account <email> --enable-writes
 `;
 
 const GRAPH_USAGE = `mail-index graph — derived contact-graph analysis (lazy)
@@ -248,6 +276,7 @@ async function cmdSetup(argv: string[]): Promise<number> {
       client: { type: 'string' },
       since: { type: 'string' },
       'no-sync': { type: 'boolean' },
+      'enable-writes': { type: 'boolean' },
       json: { type: 'boolean' },
       help: { type: 'boolean' },
     },
@@ -272,6 +301,7 @@ async function cmdSetup(argv: string[]): Promise<number> {
     ...(values.client ? { client: values.client } : {}),
     ...(values.since ? { since: values.since } : {}),
     ...(values['no-sync'] ? { noSync: true } : {}),
+    ...(values['enable-writes'] ? { enableWrites: true } : {}),
     ...(values.json ? { json: true } : {}),
   };
 
@@ -566,6 +596,74 @@ function cmdOpen(argv: string[]): number {
   }
 }
 
+async function cmdArchive(argv: string[]): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: { help: { type: 'boolean' } },
+    allowPositionals: true,
+  });
+
+  if (values.help) {
+    process.stdout.write(ARCHIVE_USAGE);
+    return 0;
+  }
+  if (positionals.length !== 1) {
+    throw new CliError('archive requires a single <account:message-id> reference');
+  }
+
+  const ref = parseRef(positionals[0]!);
+  const config = loadConfig();
+  const db = openDb();
+  try {
+    const repo = new Repo(db);
+    const result = await runLabelChange(config, repo, ref, archiveChange());
+    process.stdout.write(formatMutateResult('archived', result));
+    return 0;
+  } finally {
+    db.close();
+  }
+}
+
+async function cmdLabel(argv: string[]): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: {
+      add: { type: 'string', multiple: true },
+      remove: { type: 'string', multiple: true },
+      help: { type: 'boolean' },
+    },
+    allowPositionals: true,
+  });
+
+  if (values.help) {
+    process.stdout.write(LABEL_USAGE);
+    return 0;
+  }
+  if (positionals.length !== 1) {
+    throw new CliError('label requires a single <account:message-id> reference');
+  }
+  const add = (values.add ?? []) as string[];
+  const remove = (values.remove ?? []) as string[];
+  if (add.length === 0 && remove.length === 0) {
+    throw new CliError('label requires at least one --add <label> or --remove <label>');
+  }
+
+  const ref = parseRef(positionals[0]!);
+  const config = loadConfig();
+  const db = openDb();
+  try {
+    const repo = new Repo(db);
+    const result = await runLabelChange(config, repo, ref, {
+      addLabelIds: add,
+      removeLabelIds: remove,
+    });
+    process.stdout.write(formatMutateResult('labeled', result));
+    return 0;
+  } finally {
+    db.close();
+  }
+}
+
 function cmdGraph(argv: string[]): number {
   const [sub, ...rest] = argv;
 
@@ -787,6 +885,10 @@ async function main(argv: string[]): Promise<number> {
       return cmdShow(rest);
     case 'open':
       return cmdOpen(rest);
+    case 'archive':
+      return cmdArchive(rest);
+    case 'label':
+      return cmdLabel(rest);
     case 'graph':
       return cmdGraph(rest);
     case 'compact':

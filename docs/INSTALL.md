@@ -59,7 +59,14 @@ Prefer source? `git clone` the repo, `pnpm install && pnpm build`, and invoke as
 Reading Gmail needs a Google **OAuth client**. mail-index gives you **two ways**
 to get one — pick whichever fits. Both end with the same thing: an adapter
 authenticated against your mailbox with **read-only** Gmail scope
-(`gmail.readonly`). mail-index never mutates the mailbox.
+(`gmail.readonly`). mail-index does not mutate the mailbox by default.
+
+> **Optional: archive + label edits.** If you want mail-index to archive
+> messages or edit labels, add `--enable-writes` to `mail-index setup`. That
+> requests the least-privilege `gmail.modify` scope *in addition* to readonly
+> (never send or delete) and unlocks the `mail-index archive`/`label` commands
+> and the `archive_message`/`modify_labels` MCP tools. Leave it off to stay
+> read-only at the token level. See [ADR-0007](adr/0007-opt-in-mailbox-writes.md).
 
 | | **Option A — mail-index beta client** | **Option B — your own Google Cloud client** |
 |---|---|---|
@@ -326,9 +333,11 @@ server fails to start or `get_message` can't enrich:
   (e.g. `gws`). Add the directory holding that binary to the server's `env.PATH`
   (above) so the app can find it. Restart the desktop app after editing the config.
 
-The server is **read-only on the mailbox**: the only provider contact it ever
-makes is `get_message`'s single inline body fetch
-([ADR-0001](adr/0001-inline-enrichment-is-o1-only.md)). Everything bulk (sync,
+The server is **read-only on the mailbox by default**: the only provider contact
+it makes is `get_message`'s single inline body fetch
+([ADR-0001](adr/0001-inline-enrichment-is-o1-only.md)) — unless you opted into
+writes (`--enable-writes`), which adds the two mutating tools `archive_message`
+and `modify_labels` ([ADR-0007](adr/0007-opt-in-mailbox-writes.md)). Everything bulk (sync,
 enrich, graph build, compact) is returned to the agent as a **command
 handback** — the exact `mail-index` CLI command for the agent to run itself. See
 [MCP.md](MCP.md) for the full tool reference.

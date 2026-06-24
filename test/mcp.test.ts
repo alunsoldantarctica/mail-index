@@ -15,7 +15,8 @@
  *    set, when an exact key misses (recall);
  *  - a STALE catch_up returns current data + sync_started + eta_seconds and a
  *    body command handback, spawning a (spied) detached sync (ADR-0005);
- *  - the 16-tool surface is advertised and every advertised tool dispatches.
+ *  - the full tool surface is advertised and every advertised tool dispatches,
+ *    incl. the two opt-in writers (archive_message, modify_labels).
  *
  * Tests import the compiled output; `pnpm test` builds first via pretest.
  */
@@ -48,10 +49,13 @@ import {
   syncStatus,
   catchUp,
   digestSources,
+  archiveMessage,
+  modifyLabels,
   parseSince,
   handback,
 } from '../dist/mcp/tools.js';
 import { TOOLS, toolList, dispatch } from '../dist/mcp/server.js';
+import { InsufficientScopeError } from '../dist/source/index.js';
 import {
   setupToolList,
   dispatchSetup,
@@ -478,7 +482,7 @@ test('surface: exactly the PLAN §12 tools are advertised, all with schemas, all
     'find_person', 'list_threads', 'graph_neighbors', 'graph_communities',
     'interest_propose', 'interest_set', 'interest_get', 'save_summary',
     'domains_to_categorize', 'save_domain_category', 'cadence', 'sync_status',
-    'catch_up', 'digest_sources',
+    'catch_up', 'digest_sources', 'archive_message', 'modify_labels',
   ];
   const names = TOOLS.map((t) => t.name);
   assert.deepEqual(new Set(names), new Set(expected), 'the full §12 surface');
@@ -520,10 +524,11 @@ test('setup mode: tools/list advertises exactly the reduced setup surface', () =
   }
 });
 
-test('setup mode: with config present the FULL 19-tool surface is what serve() would use', () => {
+test('setup mode: with config present the FULL 21-tool surface is what serve() would use', () => {
   // The config-present path serves the full surface — assert its size/identity
   // here so the bootstrapping branch never silently shrinks the real surface.
-  assert.equal(TOOLS.length, 19, 'full surface is 19 tools');
+  // 19 read tools + the 2 opt-in writers (archive_message, modify_labels).
+  assert.equal(TOOLS.length, 21, 'full surface is 21 tools');
 });
 
 test('setup_status reports observation and does not crash with no config', () => {
@@ -553,4 +558,58 @@ test('setup mode: dispatchSetup routes the two tools and rejects unknown', () =>
   const instr = dispatchSetup('setup_instructions', { account: 'x@y.com' });
   assert.match(instr.recommended_command, /x@y\.com/);
   assert.throws(() => dispatchSetup('no_such_setup_tool', {}));
+});
+
+// -------------------- opt-in writers (archive + label) --------------------
+
+/** A fake MailSource whose modify() records calls (and can be made to fail). */
+function writableSourceFactory(calls, failWith) {
+  return () => ({
+    provider: 'fake',
+    check: async () => ({ ok: true, address: ME }),
+    async *listIds() {},
+    async getMetadata() { return []; },
+    async getFull() { return null; },
+    modify: (id, change) => {
+      if (failWith) return Promise.reject(failWith);
+      calls.push({ id, change });
+      return Promise.resolve();
+    },
+  });
+}
+
+test('archive_message + modify_labels are registered as tools and marked mutating', () => {
+  const archive = TOOLS.find((t) => t.name === 'archive_message');
+  const label = TOOLS.find((t) => t.name === 'modify_labels');
+  assert.ok(archive && label, 'both opt-in writers are in the registry');
+  assert.match(archive.description, /MUTATES|OPT-IN/);
+  assert.match(label.description, /MUTATES|OPT-IN/);
+});
+
+test('archive_message drops INBOX via the provider and reflects it locally', async () => {
+  const repo = freshRepo();
+  seedMailbox(repo);
+  const calls = [];
+  const ctx = ctxFor(repo, { buildSource: writableSourceFactory(calls) });
+  const res = await archiveMessage(ctx, { ref: `${ACCOUNT}:m3` });
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].change, { removeLabelIds: ['INBOX'] });
+  assert.equal(res.indexed, true);
+  assert.ok('index_as_of' in res, 'stamps index_as_of like every tool');
+});
+
+test('modify_labels requires at least one label', async () => {
+  const repo = freshRepo();
+  seedMailbox(repo);
+  const ctx = ctxFor(repo, { buildSource: writableSourceFactory([]) });
+  await assert.rejects(() => modifyLabels(ctx, { ref: `${ACCOUNT}:m3` }), /at least one/);
+});
+
+test('archive_message surfaces an insufficient-scope error as a tool error', async () => {
+  const repo = freshRepo();
+  seedMailbox(repo);
+  const ctx = ctxFor(repo, {
+    buildSource: writableSourceFactory([], new InsufficientScopeError('gog', 'gog auth add ...')),
+  });
+  await assert.rejects(() => archiveMessage(ctx, { ref: `${ACCOUNT}:m3` }), /read-only|gmail\.modify|re-auth/i);
 });
