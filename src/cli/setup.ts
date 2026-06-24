@@ -165,6 +165,10 @@ export function authAddArgs(account: string, enableWrites = false): string[] {
   ];
   if (enableWrites) {
     args.push('--extra-scopes=https://www.googleapis.com/auth/gmail.modify');
+    // Upgrading an already-readonly account: gog reuses the stored refresh token
+    // and would NOT re-consent for the broader scope without this — the upgrade
+    // would silently no-op. Forcing consent is harmless on a fresh auth too.
+    args.push('--force-consent');
   }
   return args;
 }

@@ -14,6 +14,7 @@
  *  - {@link GwsAdapter.listIds}     `gmail users messages list`         (paged; honours scope)
  *  - {@link GwsAdapter.getMetadata} `gmail users messages get format=metadata`
  *  - {@link GwsAdapter.getFull}     `gmail users messages get format=full`
+ *  - {@link GwsAdapter.modify}      `gmail users messages modify`        (OPT-IN write; needs a modify scope)
  *
  * §8 pitfall: `getMetadata` uses **plain** `format=metadata` and never passes
  * `metadataHeaders` — restricting headers through gws is unreliable and silently
@@ -24,7 +25,15 @@
  * the ingest layer distills.
  */
 
-import type { MailScope, MailSource, MessageFull, MessageMetadata, SourceIdentity } from '../../index.js';
+import type {
+  LabelChange,
+  MailScope,
+  MailSource,
+  MessageFull,
+  MessageMetadata,
+  SourceIdentity,
+} from '../../index.js';
+import { InsufficientScopeError } from '../../index.js';
 import {
   type GmailMessage,
   buildGmailQuery,
@@ -183,6 +192,53 @@ export class GwsAdapter implements MailSource {
     const { bodyText, bodyHtml, mimeType } = extractBodies(res.payload);
     return { ...toMetadata(res), bodyText, bodyHtml, mimeType };
   }
+
+  /**
+   * OPT-IN write (the one mutating method). Apply a label change to one message
+   * via `gws gmail users messages modify` — the Gmail `messages.modify` REST
+   * call (addLabelIds / removeLabelIds). Archive = remove `INBOX`. A no-op change
+   * is skipped (the API requires at least one of the two arrays).
+   *
+   * The gws config supplies the scope. A Gmail *modify* capability is required
+   * (`gmail.modify` or the broader `https://mail.google.com/`); a read-only gws
+   * grant makes the API return 403, which we re-throw as a typed
+   * {@link InsufficientScopeError}.
+   */
+  async modify(id: string, change: LabelChange): Promise<void> {
+    const addLabelIds = (change.addLabelIds ?? []).filter((s) => s.trim() !== '');
+    const removeLabelIds = (change.removeLabelIds ?? []).filter((s) => s.trim() !== '');
+    if (addLabelIds.length === 0 && removeLabelIds.length === 0) return;
+
+    const params: Record<string, unknown> = { userId: 'me', id };
+    if (addLabelIds.length > 0) params['addLabelIds'] = addLabelIds;
+    if (removeLabelIds.length > 0) params['removeLabelIds'] = removeLabelIds;
+
+    try {
+      await this.#run(['gmail', 'users', 'messages', 'modify', '--params', JSON.stringify(params)]);
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (isInsufficientScope(msg)) {
+        throw new InsufficientScopeError(
+          'gws',
+          'gws auth login  # re-authorize this mailbox with a Gmail modify scope ' +
+            '(gmail.modify or https://mail.google.com/)',
+          msg,
+        );
+      }
+      throw err;
+    }
+  }
+}
+
+/**
+ * Heuristic: does a gws/Gmail error indicate the token lacks a mutating scope
+ * (vs. a transient/other failure)? Gmail returns HTTP 403 with "insufficient
+ * authentication scopes" / "PERMISSION_DENIED"; gws folds that into its error.
+ */
+function isInsufficientScope(message: string): boolean {
+  return /\b403\b|insufficient (?:authentication )?scopes?|PERMISSION_DENIED|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(
+    message,
+  );
 }
 
 export { GwsError } from './runner.js';

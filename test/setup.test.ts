@@ -74,6 +74,7 @@ test('--enable-writes adds the least-privilege gmail.modify scope (never send/de
   assert.deepEqual(args, [
     'auth', 'add', EMAIL, '--client', 'mail-index', '--services', 'gmail',
     '--gmail-scope=readonly', '--extra-scopes=https://www.googleapis.com/auth/gmail.modify',
+    '--force-consent',
   ]);
   // Least-privilege: no full scope, no send/delete.
   assert.ok(!args.includes('--gmail-scope=full'));

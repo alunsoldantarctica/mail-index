@@ -37,9 +37,16 @@ Decisions:
   deliberately. A scope-limited grant returns a typed
   `InsufficientScopeError` carrying the exact re-auth command.
 
+Both adapters implement the seam. The **gog** adapter (the one-click public
+path) gates writes on the opt-in `gmail.modify` re-auth above. The **gws**
+adapter (bring-your-own Google Workspace CLI) uses whatever scope its own config
+already grants — if that includes a Gmail modify capability (`gmail.modify` or
+the broader `https://mail.google.com/`), writes work; if it is read-only, the
+API returns 403 and the adapter raises the same typed `InsufficientScopeError`.
+Either way a write is impossible without a modify-capable token.
+
 Consequences: the README/SECURITY/THREAT-MODEL/CONTEXT trust language is
 updated from "read-only — never mutates" to "read-only by default; explicit,
 least-privilege opt-in writes." Label *creation* is intentionally out of scope
-(add/remove existing labels + archive only); send and delete are excluded by the
-scope choice; gws-adapter write parity is a later follow-up (gog is the opt-in
-path today).
+(add/remove existing labels + archive only); send and delete are excluded for
+gog by the scope choice (and never invoked for gws regardless of its scope).

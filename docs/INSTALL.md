@@ -62,11 +62,21 @@ authenticated against your mailbox with **read-only** Gmail scope
 (`gmail.readonly`). mail-index does not mutate the mailbox by default.
 
 > **Optional: archive + label edits.** If you want mail-index to archive
-> messages or edit labels, add `--enable-writes` to `mail-index setup`. That
-> requests the least-privilege `gmail.modify` scope *in addition* to readonly
-> (never send or delete) and unlocks the `mail-index archive`/`label` commands
-> and the `archive_message`/`modify_labels` MCP tools. Leave it off to stay
-> read-only at the token level. See [ADR-0007](adr/0007-opt-in-mailbox-writes.md).
+> messages or edit labels, opt in to the least-privilege `gmail.modify` scope
+> (read + modify only — never send or delete). Two ways:
+>
+> - **At onboarding:** add `--enable-writes` to `mail-index setup`.
+> - **For an already-onboarded account:** run the bundled helper
+>   `scripts/enable-writes.sh <account-email>` (a copy-safe wrapper around the
+>   gog re-consent — handy because the raw scope flag is long and easy to
+>   mangle when pasting).
+>
+> Either unlocks the `mail-index archive`/`label` commands and the
+> `archive_message`/`modify_labels` MCP tools. Leave it off to stay read-only at
+> the token level. **gws-adapter** accounts use whatever scope their own gws
+> config grants — if that already includes a Gmail modify scope (`gmail.modify`
+> or `https://mail.google.com/`), writes work with no extra step. See
+> [ADR-0007](adr/0007-opt-in-mailbox-writes.md).
 
 | | **Option A — mail-index beta client** | **Option B — your own Google Cloud client** |
 |---|---|---|

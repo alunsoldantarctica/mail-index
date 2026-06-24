@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 
 import { runMailSourceContract } from '../dist/source/contract.js';
 import { GwsAdapter } from '../dist/source/adapters/gws/index.js';
+import { InsufficientScopeError } from '../dist/source/index.js';
 import {
   GWS_CONTRACT_FIXTURES,
   makeGwsFixtureRunner,
@@ -85,4 +86,53 @@ test('GwsAdapter check() reports the authenticated address', async () => {
   const identity = await makeAdapter().check();
   assert.equal(identity.ok, true);
   assert.equal(identity.address, 'al@example.com');
+});
+
+test('GwsAdapter.modify builds the messages modify params (add + remove)', async () => {
+  let captured: readonly string[] = [];
+  const adapter = new GwsAdapter({
+    configDir: '/tmp/x',
+    runner: (args) => {
+      captured = args;
+      return Promise.resolve({});
+    },
+  });
+  await adapter.modify('msg-1', { addLabelIds: ['STARRED'], removeLabelIds: ['INBOX'] });
+  assert.deepEqual(captured.slice(0, 4), ['gmail', 'users', 'messages', 'modify']);
+  assert.equal(captured[4], '--params');
+  assert.deepEqual(JSON.parse(captured[5]), {
+    userId: 'me',
+    id: 'msg-1',
+    addLabelIds: ['STARRED'],
+    removeLabelIds: ['INBOX'],
+  });
+});
+
+test('GwsAdapter.modify is a no-op (no spawn) when nothing to add or remove', async () => {
+  let called = false;
+  const adapter = new GwsAdapter({
+    configDir: '/tmp/x',
+    runner: () => {
+      called = true;
+      return Promise.resolve({});
+    },
+  });
+  await adapter.modify('msg-1', { addLabelIds: [], removeLabelIds: [''] });
+  assert.equal(called, false);
+});
+
+test('GwsAdapter.modify maps an insufficient-scope failure to InsufficientScopeError', async () => {
+  const adapter = new GwsAdapter({
+    configDir: '/tmp/x',
+    runner: () => Promise.reject(new Error('403 PERMISSION_DENIED: insufficient scopes')),
+  });
+  await assert.rejects(
+    () => adapter.modify('msg-1', { removeLabelIds: ['INBOX'] }),
+    (err) => {
+      assert.ok(err instanceof InsufficientScopeError);
+      assert.equal(err.provider, 'gws');
+      assert.match(err.remedy, /gws auth login/);
+      return true;
+    },
+  );
 });
