@@ -23,6 +23,7 @@ import { GwsAdapter } from '../source/adapters/gws/index.js';
 import { GogAdapter } from '../source/adapters/gog/index.js';
 import type { MailScope, MailSource } from '../source/index.js';
 import { syncMetadata, type SyncResult } from '../ingest/sync.js';
+import { reconcileInbox } from '../ingest/reconcile-inbox.js';
 import { buildGraph } from '../graph/index.js';
 
 /** CLI-supplied sync flags (already parsed; all optional). */
@@ -117,6 +118,31 @@ export async function runSyncOne(
   const priorCompletedSyncs = repo.completedSyncCount(label);
 
   const result = await syncMetadata({ account: label, source, repo, scope });
+
+  // Inbox membership reconcile: the windowed sweep never revisits old mail, so
+  // a message archived after it left the window keeps a stale INBOX label. This
+  // pass makes "what's in my inbox right now" exact again — bounded by inbox
+  // size, INDEX-ONLY, and (like the graph build) never allowed to fail a sync.
+  //
+  // Skipped when the sweep is explicitly `limit`-bounded: a limit is a cost cap,
+  // and reconcile lists (and indexes new ids from) the WHOLE live inbox, which
+  // would blow past it. The common cadence (`--since`) sets no limit, so it
+  // reconciles; a deliberately capped sweep stays capped (run an unbounded sync
+  // to refresh inbox membership).
+  if (scope?.limit == null) {
+    try {
+      let knownAddresses: string[] = [];
+      try {
+        const identity = await source.check();
+        if (identity.ok && identity.address) knownAddresses = [identity.address];
+      } catch {
+        // Probe failure only weakens direction classification of new inbox mail.
+      }
+      await reconcileInbox({ account: label, source, repo, knownAddresses });
+    } catch {
+      // Membership freshness is best-effort; the index stays usable without it.
+    }
+  }
 
   // D10: auto graph build after a full/initial sync only. Derived + lazy (D8):
   // never let a graph failure mask a successful sync.

@@ -98,6 +98,8 @@ export interface MessageRow {
   body_fetched_at: string | null;
   /** JSON array of OCR-candidate images, or null. See {@link MessageInput.ocrImagesJson}. */
   ocr_images_json: string | null;
+  /** JSON array of Gmail label ids (`INBOX`, `UNREAD`, …) as last fetched, or null. */
+  labels_json: string | null;
 }
 
 export interface SyncRunStart {
@@ -690,7 +692,7 @@ export class Repo {
               cc_addr, snippet, body_state, body_text, summary_text,
               summary_is_model, summarized_at, is_list, direction,
               unread, starred, important, category, internal_date, indexed_at,
-              body_fetched_at, ocr_images_json
+              body_fetched_at, ocr_images_json, labels_json
          FROM messages WHERE account = ? AND gmail_message_id = ?`,
     ).get(account, gmailMessageId) as MessageRow | undefined;
   }
@@ -721,7 +723,7 @@ export class Repo {
               m.summary_text, m.summary_is_model, m.summarized_at,
               m.is_list, m.direction, m.unread, m.starred, m.important,
               m.category, m.internal_date, m.indexed_at, m.body_fetched_at,
-              m.ocr_images_json
+              m.ocr_images_json, m.labels_json
          FROM messages_fts f
          JOIN messages m ON m.rowid = f.rowid
         WHERE messages_fts MATCH ? ${accountClause}
@@ -732,6 +734,81 @@ export class Repo {
       ? stmt.all(query, opts.account, limit)
       : stmt.all(query, limit);
     return rows as unknown as MessageRow[];
+  }
+
+  /**
+   * Messages carrying a given Gmail label, newest-first (label query; CONTEXT.md
+   * "Recall"). Tests label *membership* against the stored `labels_json` via
+   * `json_each` — so `INBOX` answers "what's in my inbox", `UNREAD` "what's
+   * unread", and any user label (e.g. `Label_42`) filters to that label. INBOX
+   * membership is kept exact by the per-sync inbox reconcile
+   * ({@link reconcileInbox}); other mutable labels reflect the last fetch.
+   * Optionally scoped to one account.
+   */
+  messagesByLabel(label: string, opts: { account?: string; limit?: number } = {}): MessageRow[] {
+    const limit = opts.limit ?? 20;
+    const accountClause = opts.account ? 'AND m.account = ?' : '';
+    const stmt = this.#prepare(
+      `SELECT m.account, m.gmail_message_id, m.thread_id, m.subject, m.from_addr,
+              m.to_addr, m.cc_addr, m.snippet, m.body_state, m.body_text,
+              m.summary_text, m.summary_is_model, m.summarized_at,
+              m.is_list, m.direction, m.unread, m.starred, m.important,
+              m.category, m.internal_date, m.indexed_at, m.body_fetched_at,
+              m.ocr_images_json, m.labels_json
+         FROM messages m
+        WHERE EXISTS (SELECT 1 FROM json_each(m.labels_json) WHERE value = ?) ${accountClause}
+        ORDER BY m.internal_date IS NULL, m.internal_date DESC, m.gmail_message_id ASC
+        LIMIT ?`,
+    );
+    const rows = opts.account
+      ? stmt.all(label, opts.account, limit)
+      : stmt.all(label, limit);
+    return rows as unknown as MessageRow[];
+  }
+
+  /**
+   * Of `ids`, the subset already indexed for `account`. Used by the inbox
+   * reconcile to decide which live-inbox ids still need a metadata fetch
+   * (absent) versus only a label flip (present). Empty `ids` → empty set.
+   */
+  existingMessageIds(account: string, ids: readonly string[]): Set<string> {
+    const found = new Set<string>();
+    if (ids.length === 0) return found;
+    const stmt = this.#prepare(
+      `SELECT gmail_message_id FROM messages WHERE account = ? AND gmail_message_id = ?`,
+    );
+    for (const id of ids) {
+      const row = stmt.get(account, id) as { gmail_message_id: string } | undefined;
+      if (row) found.add(row.gmail_message_id);
+    }
+    return found;
+  }
+
+  /**
+   * Ids of every message currently marked `INBOX` in its stored `labels_json`,
+   * for `account`. The reconcile diffs this against the live `in:inbox` set to
+   * find rows that were archived (drop `INBOX`) since the last fetch.
+   */
+  inboxMessageIds(account: string): string[] {
+    const rows = this.#prepare(
+      `SELECT gmail_message_id FROM messages m
+        WHERE m.account = ?
+          AND EXISTS (SELECT 1 FROM json_each(m.labels_json) WHERE value = 'INBOX')`,
+    ).all(account) as { gmail_message_id: string }[];
+    return rows.map((r) => r.gmail_message_id);
+  }
+
+  /**
+   * Overwrite a message's stored label set + derived `category` (inbox reconcile
+   * membership edit). The reconcile mutates the label array in JS (add/remove
+   * `INBOX`) and recomputes `category`, then persists both here so `labels_json`
+   * and the `category` column stay consistent. No-op-safe on a missing row.
+   */
+  setMessageLabels(account: string, id: string, labels: readonly string[], category: Category | null): void {
+    this.#prepare(
+      `UPDATE messages SET labels_json = ?, category = ?
+        WHERE account = ? AND gmail_message_id = ?`,
+    ).run(JSON.stringify(labels), category, account, id);
   }
 
   /**

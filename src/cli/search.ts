@@ -134,3 +134,15 @@ export function formatResults(rows: readonly MessageRow[], terms: readonly strin
   const lines = rows.map(formatHit);
   return lines.join('\n') + '\n';
 }
+
+/**
+ * Format a label listing (the `inbox` / `labeled` commands) — same one-line hit
+ * shape as search, with a count header and an empty notice naming the label.
+ */
+export function formatLabelResults(rows: readonly MessageRow[], label: string): string {
+  if (rows.length === 0) {
+    return `No messages labeled ${label}.\n`;
+  }
+  const header = `${rows.length} message${rows.length === 1 ? '' : 's'} labeled ${label}:`;
+  return [header, ...rows.map(formatHit)].join('\n') + '\n';
+}

@@ -53,9 +53,14 @@ export class FakeMailSource implements MailSource {
   }
 
   async *listIds(scope: MailScope = {}): AsyncIterable<string> {
+    // Honour the one Gmail operator the inbox reconcile relies on: `in:inbox`
+    // restricts the sweep to INBOX-labelled fixtures, so the fake mirrors the
+    // real adapters closely enough for membership reconcile to be exercised.
+    const inboxOnly = scope.query != null && /\bin:inbox\b/i.test(scope.query);
     let count = 0;
     for (const m of this.#fixtures.messages) {
       if (scope.includeSent === false && isSent(m)) continue;
+      if (inboxOnly && !m.labels.includes('INBOX')) continue;
       if (scope.limit != null && count >= scope.limit) return;
       count += 1;
       yield m.id;

@@ -47,6 +47,7 @@ import type { MailSource } from '../source/index.js';
 import type { Curation } from '../index/schema.js';
 import { CURATIONS } from '../index/schema.js';
 import { enrichOne } from '../ingest/enrich.js';
+import { reconcileInbox } from '../ingest/reconcile-inbox.js';
 import { isLikelyImageOnly } from '../intelligence/images.js';
 import { computeCadence, type CadenceRow } from '../intelligence/cadence.js';
 import { buildMatch } from '../index/fts.js';
@@ -184,6 +185,8 @@ export interface HitShape {
   has_summary: boolean;
   unread: boolean;
   direction: string;
+  /** Gmail label ids on the message (INBOX, UNREAD, …) as last fetched. */
+  labels: string[];
 }
 
 function toHit(row: MessageRow): HitShape {
@@ -198,7 +201,19 @@ function toHit(row: MessageRow): HitShape {
     has_summary: row.summary_text != null,
     unread: row.unread === 1,
     direction: row.direction,
+    labels: parseLabels(row.labels_json),
   };
+}
+
+/** Parse a stored `labels_json` into a string array (empty on absent/bad JSON). */
+function parseLabels(json: string | null): string[] {
+  if (!json) return [];
+  try {
+    const v: unknown = JSON.parse(json);
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 /** A compact contact shape for list/find/get. */
@@ -305,6 +320,88 @@ export function search(ctx: ToolContext, args: SearchArgs): WithMeta & { hits: H
   return withMeta(ctx.repo, args.account, { hits: rows.map(toHit) });
 }
 
+export interface ListLabeledArgs {
+  /** The Gmail label id to filter by (e.g. `INBOX`, `UNREAD`, `STARRED`). */
+  label: string;
+  account?: string;
+  limit?: number;
+}
+
+/**
+ * `list_labeled` — messages carrying a Gmail label, newest-first (label
+ * membership, not FTS). `INBOX` answers "what's in my inbox right now" (kept
+ * exact by the per-sync inbox reconcile); `UNREAD` answers "what's unread";
+ * any user label filters to that label. Snippet-first like {@link search}.
+ */
+export function listLabeled(ctx: ToolContext, args: ListLabeledArgs): WithMeta & { hits: HitShape[] } {
+  const rows = ctx.repo.messagesByLabel(args.label, {
+    ...(args.account ? { account: args.account } : {}),
+    limit: args.limit ?? 15,
+  });
+  return withMeta(ctx.repo, args.account, { hits: rows.map(toHit) });
+}
+
+export interface RefreshInboxArgs {
+  account?: string;
+  limit?: number;
+}
+
+/** The fresh inbox + what the reconcile changed (counts; `refreshed=false` = read-only fallback). */
+export interface RefreshInboxResult extends WithMeta {
+  /** True when a live provider reconcile ran; false when no creds were wired (indexed fallback). */
+  refreshed: boolean;
+  /** Inbox ids newly indexed by this refresh. */
+  added: number;
+  /** Rows that lost INBOX (archived since last fetch). */
+  archived: number;
+  /** Rows that regained INBOX (re-inboxed). */
+  restored: number;
+  hits: HitShape[];
+}
+
+/**
+ * `refresh_inbox` — reconcile INBOX membership against the live mailbox, THEN
+ * return the current inbox. Use this (not `list_labeled INBOX`) to answer
+ * "what's in my inbox right now": Gmail labels mutate (archiving drops INBOX),
+ * and a plain index read can lag, so this runs the bounded inbox reconcile
+ * inline first (the same pass every sync runs) so the result is exact.
+ *
+ * The reconcile is the ONE inline provider round-trip this tool makes (bounded
+ * by inbox size — list `in:inbox` ids + fetch only new ones), mirroring
+ * `get_message`'s inline-enrich seam. With no provider creds wired (or on a
+ * fetch failure) it degrades gracefully to the indexed inbox with
+ * `refreshed=false`, so the tool is always answerable.
+ */
+export async function refreshInbox(ctx: ToolContext, args: RefreshInboxArgs): Promise<RefreshInboxResult> {
+  const account = requireAccount(ctx, args.account, 'refresh_inbox');
+  const limit = args.limit ?? 15;
+
+  let refreshed = false;
+  let counts = { added: 0, archived: 0, restored: 0 };
+  const accCfg = ctx.config.accounts[account];
+  if (ctx.buildSource && accCfg && ctx.repo.activeSyncRun(account) == null) {
+    try {
+      const source = ctx.buildSource(accCfg);
+      // Probe own-address so newly-indexed inbox mail classifies direction (§8).
+      let knownAddresses: string[] = [];
+      try {
+        const identity = await source.check();
+        if (identity.ok && identity.address) knownAddresses = [identity.address];
+      } catch {
+        // Probe failure only weakens direction classification of new inbox mail.
+      }
+      const res = await reconcileInbox({ account, source, repo: ctx.repo, knownAddresses });
+      counts = { added: res.added, archived: res.archived, restored: res.restored };
+      refreshed = true;
+    } catch {
+      // Best-effort: fall back to the indexed inbox (read-only resilience).
+    }
+  }
+
+  const rows = ctx.repo.messagesByLabel('INBOX', { account, limit });
+  return withMeta(ctx.repo, account, { refreshed, ...counts, hits: rows.map(toHit) });
+}
+
 export interface GetMessageArgs {
   ref: string;
   /**
@@ -332,6 +429,8 @@ export interface MessageDetail extends WithMeta {
   important: boolean;
   isList: boolean;
   direction: string;
+  /** Gmail label ids on the message (INBOX, UNREAD, …) as last fetched. */
+  labels: string[];
   bodyState: string;
   summary: string | null;
   /** The distilled body — only populated at `level: 'body'`. */
@@ -398,6 +497,7 @@ export async function getMessage(ctx: ToolContext, args: GetMessageArgs): Promis
     important: row.important === 1,
     isList: row.is_list === 1,
     direction: row.direction,
+    labels: parseLabels(row.labels_json),
     bodyState: row.body_state,
     summary: row.summary_text,
     body,
