@@ -2,6 +2,8 @@
 
 [![npm version](https://img.shields.io/npm/v/mail-index?logo=npm&color=cb3837)](https://www.npmjs.com/package/mail-index)
 [![npm downloads](https://img.shields.io/npm/dm/mail-index?logo=npm&color=cb3837)](https://www.npmjs.com/package/mail-index)
+[![GitHub stars](https://img.shields.io/github/stars/alunsoldantarctica/mail-index?logo=github)](https://github.com/alunsoldantarctica/mail-index/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/alunsoldantarctica/mail-index?logo=github)](https://github.com/alunsoldantarctica/mail-index/network/members)
 [![CI](https://github.com/alunsoldantarctica/mail-index/actions/workflows/ci.yml/badge.svg)](https://github.com/alunsoldantarctica/mail-index/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%E2%89%A524-3c873a)
@@ -200,6 +202,10 @@ mail-index is one piece of that — giving agents durable memory of a mailbox
 without handing them the keys to it.
 
 More: **[unsold.group/al](https://unsold.group/al)**
+
+## Project growth
+
+[![Star History Chart](https://api.star-history.com/svg?repos=alunsoldantarctica/mail-index&type=Date)](https://star-history.com/#alunsoldantarctica/mail-index&Date)
 
 ## Feedback & contact
 
