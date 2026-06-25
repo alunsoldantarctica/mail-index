@@ -209,12 +209,25 @@ export class GwsAdapter implements MailSource {
     const removeLabelIds = (change.removeLabelIds ?? []).filter((s) => s.trim() !== '');
     if (addLabelIds.length === 0 && removeLabelIds.length === 0) return;
 
-    const params: Record<string, unknown> = { userId: 'me', id };
-    if (addLabelIds.length > 0) params['addLabelIds'] = addLabelIds;
-    if (removeLabelIds.length > 0) params['removeLabelIds'] = removeLabelIds;
+    // gws splits URL/path params (`--params`) from the request BODY (`--json`).
+    // userId/id are path params; the label arrays are the messages.modify body —
+    // putting them in --params makes gws treat the array as a single literal
+    // label ("Invalid label: [...]"). So: --params for the path, --json for body.
+    const body: Record<string, unknown> = {};
+    if (addLabelIds.length > 0) body['addLabelIds'] = addLabelIds;
+    if (removeLabelIds.length > 0) body['removeLabelIds'] = removeLabelIds;
 
     try {
-      await this.#run(['gmail', 'users', 'messages', 'modify', '--params', JSON.stringify(params)]);
+      await this.#run([
+        'gmail',
+        'users',
+        'messages',
+        'modify',
+        '--params',
+        JSON.stringify({ userId: 'me', id }),
+        '--json',
+        JSON.stringify(body),
+      ]);
     } catch (err) {
       const msg = (err as Error).message;
       if (isInsufficientScope(msg)) {

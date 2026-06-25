@@ -99,10 +99,12 @@ test('GwsAdapter.modify builds the messages modify params (add + remove)', async
   });
   await adapter.modify('msg-1', { addLabelIds: ['STARRED'], removeLabelIds: ['INBOX'] });
   assert.deepEqual(captured.slice(0, 4), ['gmail', 'users', 'messages', 'modify']);
+  // Path params in --params; label arrays in the request BODY via --json (gws
+  // mis-encodes label arrays passed through --params).
   assert.equal(captured[4], '--params');
-  assert.deepEqual(JSON.parse(captured[5]), {
-    userId: 'me',
-    id: 'msg-1',
+  assert.deepEqual(JSON.parse(captured[5]), { userId: 'me', id: 'msg-1' });
+  assert.equal(captured[6], '--json');
+  assert.deepEqual(JSON.parse(captured[7]), {
     addLabelIds: ['STARRED'],
     removeLabelIds: ['INBOX'],
   });
