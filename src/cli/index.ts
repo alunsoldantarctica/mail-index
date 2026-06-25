@@ -24,7 +24,7 @@ import { enrich, EnrichError, type EnrichSelector } from '../ingest/enrich.js';
 import { formatInit, runInit } from './init.js';
 import { defaultDeps, formatSetup, runSetup, SetupError, type SetupOptions } from './setup.js';
 import { buildSource, formatSyncResult, runSyncAll, runSyncOne, type SyncFlags } from './sync.js';
-import { formatResults, runSearchEnriching, type SearchFlags } from './search.js';
+import { formatLabelResults, formatResults, runSearchEnriching, type SearchFlags } from './search.js';
 import { formatShow, parseRef, runShow, RefError } from './show.js';
 import { archiveChange, formatMutateResult, runLabelChange } from './labels.js';
 import { formatOpen, runOpen } from './open.js';
@@ -46,6 +46,8 @@ Commands:
   enrich  --account <label>     Fetch + distil bodies for selected messages (phase 2)
   curate  [--account <label>]   Interactive curation wizard (no-agent fallback; D14)
   search  <terms>               Recall over the index (ranked, snippet-first)
+  inbox   [--account <label>]   List what's in the inbox now (kept fresh each sync)
+  labeled <LABEL>               List messages carrying a Gmail label (e.g. UNREAD, STARRED)
   show    <account:message-id>  Print a message's full record (auto-enriches a meta row)
   open    <account:message-id>  Print the provider web URL for a message (no fetch)
   archive <account:message-id>  Archive a message (drop INBOX) — opt-in write; needs gmail.modify
@@ -141,6 +143,22 @@ Options:
   --account <label>   Restrict the search to one account
   --limit N           Maximum hits to return (default 20)
   --enrich            Enrich the returned hits' bodies, then re-rank (CLI-only; see ADR-0001)
+`;
+
+const LABELED_USAGE = `mail-index inbox / labeled — list messages by Gmail label
+
+Usage:
+  mail-index inbox [--account <label>] [--limit N]
+  mail-index labeled <LABEL> [--account <label>] [--limit N]
+
+Notes:
+  inbox is sugar for 'labeled INBOX'. INBOX membership is reconciled on every
+  sync, so 'inbox' reflects what's in the mailbox now. Other mutable labels
+  (UNREAD, STARRED) reflect the state at last fetch.
+
+Options:
+  --account <label>   Restrict to one account
+  --limit N           Maximum messages to return (default 20)
 `;
 
 const SHOW_USAGE = `mail-index show — print a message's full record
@@ -528,6 +546,48 @@ async function cmdSearch(argv: string[]): Promise<number> {
   }
 }
 
+/**
+ * `inbox` / `labeled <LABEL>` — list messages carrying a Gmail label, newest
+ * first. `inbox` is sugar for `labeled INBOX` (the membership the per-sync
+ * reconcile keeps exact). A fixed `label` (from the `inbox` route) takes no
+ * positional; otherwise the label is the sole positional.
+ */
+function cmdLabeled(argv: string[], label?: string): number {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: {
+      account: { type: 'string' },
+      limit: { type: 'string' },
+      help: { type: 'boolean' },
+    },
+    allowPositionals: true,
+  });
+
+  if (values.help) {
+    process.stdout.write(LABELED_USAGE);
+    return 0;
+  }
+
+  const resolved = label ?? positionals[0];
+  if (resolved == null || resolved === '') {
+    throw new CliError('labeled requires a label name (e.g. mail-index labeled UNREAD)');
+  }
+
+  const limit = parseLimit(values.limit, '--limit');
+  const db = openDb();
+  try {
+    const repo = new Repo(db);
+    const rows = repo.messagesByLabel(resolved, {
+      ...(values.account ? { account: values.account } : {}),
+      ...(limit != null ? { limit } : {}),
+    });
+    process.stdout.write(formatLabelResults(rows, resolved));
+    return 0;
+  } finally {
+    db.close();
+  }
+}
+
 async function cmdShow(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
     args: argv,
@@ -881,6 +941,10 @@ async function main(argv: string[]): Promise<number> {
       return cmdCurate(rest);
     case 'search':
       return cmdSearch(rest);
+    case 'inbox':
+      return cmdLabeled(rest, 'INBOX');
+    case 'labeled':
+      return cmdLabeled(rest);
     case 'show':
       return cmdShow(rest);
     case 'open':

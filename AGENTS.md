@@ -55,7 +55,7 @@ Any client that speaks MCP over stdio works — point it at the `mail-index-mcp`
 command (or `node dist/mcp/index.js`). Use the same `env.PATH` note as above so
 the adapter CLI (e.g. `gws`) is resolvable for inline body fetches.
 
-Verify: ask the agent *"what mail-index tools do you have?"* — you should see 21,
+Verify: ask the agent *"what mail-index tools do you have?"* — you should see 23,
 and *"what's the status of my mail index?"* should return per-account counts.
 
 ---

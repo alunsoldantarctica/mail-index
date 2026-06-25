@@ -21,7 +21,7 @@ user's data; accounts and the curated profile are private operator config.
 - [Agent setup](https://github.com/alunsoldantarctica/mail-index/blob/main/AGENTS.md): wiring the MCP into Claude Desktop / Claude Code / Codex / any MCP client, plus a usage primer for the agent
 
 ## Reference
-- [MCP tool reference](https://github.com/alunsoldantarctica/mail-index/blob/main/docs/MCP.md): the 21 tools (19 read-only + the 2 opt-in writers archive_message/modify_labels), args, compact result shapes, the `index_as_of` freshness + command-handback contracts
+- [MCP tool reference](https://github.com/alunsoldantarctica/mail-index/blob/main/docs/MCP.md): the 23 tools (21 read-only + the 2 opt-in writers archive_message/modify_labels), args, compact result shapes, the `index_as_of` freshness + command-handback contracts
 - [Adapter contract](https://github.com/alunsoldantarctica/mail-index/blob/main/docs/ADAPTERS.md): the `MailSource` interface and how to write + contract-test a new provider adapter
 - [Architecture & plan](https://github.com/alunsoldantarctica/mail-index/blob/main/docs/PLAN.md): data model, layered architecture, the ADR digest, roadmap
 - [Decision records](https://github.com/alunsoldantarctica/mail-index/tree/main/docs/adr): ADR-0001 (O(1) inline enrich / command handbacks), 0002 (local-only), 0003 (summaries + demotion), 0004 (intelligence is the user's LLM), 0005 (freshness/background sync), 0006 (self-contained FTS5), 0007 (opt-in mailbox writes)
