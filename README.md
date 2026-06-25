@@ -31,13 +31,27 @@ re-auth; never send or delete). See [ADR-0007](docs/adr/0007-opt-in-mailbox-writ
 </p>
 
 > **Status: v1.0 — published.** Progressive sync, the correspondence graph, the
-> interest engine, curation, the full 18-tool MCP surface, and the write-back
+> interest engine, curation, the full 23-tool MCP surface, and the write-back
 > loops are built and tested — and `mail-index` is live on
 > **[npm](https://www.npmjs.com/package/mail-index)** with a
 > **[`.mcpb` bundle](https://github.com/alunsoldantarctica/mail-index/releases/latest)**.
 > Still in progress: the bundled Option A OAuth client and signed one-click
 > installers. Architecture lives in
 > **[docs/PLAN.md](docs/PLAN.md)**; start with **[docs/INSTALL.md](docs/INSTALL.md)**.
+
+> [!TIP]
+> **New in v1.4 — opt-in mailbox writes + human-readable labels.**
+> mail-index can now **archive** a message and **edit its labels** directly on
+> Gmail — via the `archive` / `label` CLI commands and the `archive_message` /
+> `modify_labels` MCP tools, on both the gog and gws adapters. It stays
+> **read-only by default**: writes are unreachable until you opt in with a
+> *least-privilege* `gmail.modify` grant (**never** send or delete) — enable per
+> account with `mail-index setup --account <email> --enable-writes` or the
+> bundled `scripts/enable-writes.sh`. Labels now render as their **human names**
+> everywhere (the index caches Gmail's label catalogue and resolves
+> `Label_3546…` → *"Expedition Insure"* in both directions), and you can pass a
+> friendly label name to `label --add/--remove`. The local-only / zero-egress
+> guarantee is unchanged. See **[ADR-0007](docs/adr/0007-opt-in-mailbox-writes.md)**.
 
 ---
 
