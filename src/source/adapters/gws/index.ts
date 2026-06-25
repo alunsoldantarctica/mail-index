@@ -31,6 +31,7 @@ import type {
   MailSource,
   MessageFull,
   MessageMetadata,
+  ProviderLabel,
   SourceIdentity,
 } from '../../index.js';
 import { InsufficientScopeError } from '../../index.js';
@@ -38,6 +39,7 @@ import {
   type GmailMessage,
   buildGmailQuery,
   extractBodies,
+  parseLabelList,
   toMetadata,
 } from '../gmail-shared.js';
 import { type GwsRunner, GwsError, spawnGwsRunner } from './runner.js';
@@ -191,6 +193,19 @@ export class GwsAdapter implements MailSource {
     if (!res?.id) return null;
     const { bodyText, bodyHtml, mimeType } = extractBodies(res.payload);
     return { ...toMetadata(res), bodyText, bodyHtml, mimeType };
+  }
+
+  /** List the mailbox label catalogue via `gws gmail users labels list`. */
+  async listLabels(): Promise<ProviderLabel[]> {
+    const res = (await this.#run([
+      'gmail',
+      'users',
+      'labels',
+      'list',
+      '--params',
+      JSON.stringify({ userId: 'me' }),
+    ])) as { labels?: { id?: string; name?: string; type?: string }[] };
+    return parseLabelList(res?.labels);
   }
 
   /**

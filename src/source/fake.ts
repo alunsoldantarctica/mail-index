@@ -13,6 +13,7 @@ import type {
   MailSource,
   MessageFull,
   MessageMetadata,
+  ProviderLabel,
   SourceIdentity,
 } from './index.js';
 import { DEFAULT_FIXTURES, type MailSourceFixtures } from './fixtures/index.js';
@@ -80,5 +81,22 @@ export class FakeMailSource implements MailSource {
   getFull(id: string): Promise<MessageFull | null> {
     const m = this.#fixtures.messages.find((x) => x.id === id);
     return Promise.resolve(m ?? null);
+  }
+
+  /**
+   * A small fixed label catalogue: the self-named system labels the fixtures
+   * use plus one opaque user label (`Label_1` → "Coverage Review"), so tests can
+   * exercise both id→name translation and system-label passthrough.
+   */
+  listLabels(): Promise<ProviderLabel[]> {
+    return Promise.resolve([
+      { id: 'INBOX', name: 'INBOX', type: 'system' },
+      { id: 'SENT', name: 'SENT', type: 'system' },
+      { id: 'UNREAD', name: 'UNREAD', type: 'system' },
+      { id: 'STARRED', name: 'STARRED', type: 'system' },
+      { id: 'IMPORTANT', name: 'IMPORTANT', type: 'system' },
+      { id: 'CATEGORY_PERSONAL', name: 'CATEGORY_PERSONAL', type: 'system' },
+      { id: 'Label_1', name: 'Coverage Review', type: 'user' },
+    ]);
   }
 }

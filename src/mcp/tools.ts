@@ -195,11 +195,29 @@ export interface HitShape {
   has_summary: boolean;
   unread: boolean;
   direction: string;
-  /** Gmail label ids on the message (INBOX, UNREAD, …) as last fetched. */
+  /** Gmail labels on the message (human names; INBOX, UNREAD, "Coverage Review", …) as last fetched. */
   labels: string[];
 }
 
-function toHit(row: MessageRow): HitShape {
+/**
+ * A memoized id→name label renderer over a repo: caches each account's
+ * {@link Repo.labelMap} so a result set spanning many rows (and accounts) does
+ * one map fetch per account, not per row. Unknown ids pass through.
+ */
+function labelRenderer(repo: ToolContext['repo']): (account: string, ids: string[]) => string[] {
+  const cache = new Map<string, Map<string, string>>();
+  return (account, ids) => {
+    let map = cache.get(account);
+    if (!map) {
+      map = repo.labelMap(account);
+      cache.set(account, map);
+    }
+    return ids.map((id) => map.get(id) ?? id);
+  };
+}
+
+/** Project a row to a compact hit. `render` translates its label ids → names. */
+function toHit(row: MessageRow, render: (account: string, ids: string[]) => string[]): HitShape {
   return {
     ref: messageRef(row),
     account: row.account,
@@ -211,7 +229,7 @@ function toHit(row: MessageRow): HitShape {
     has_summary: row.summary_text != null,
     unread: row.unread === 1,
     direction: row.direction,
-    labels: parseLabels(row.labels_json),
+    labels: render(row.account, parseLabels(row.labels_json)),
   };
 }
 
@@ -327,7 +345,8 @@ export function search(ctx: ToolContext, args: SearchArgs): WithMeta & { hits: H
     ...(args.account ? { account: args.account } : {}),
     limit: args.limit ?? 15,
   });
-  return withMeta(ctx.repo, args.account, { hits: rows.map(toHit) });
+  const render = labelRenderer(ctx.repo);
+  return withMeta(ctx.repo, args.account, { hits: rows.map((r) => toHit(r, render)) });
 }
 
 export interface ListLabeledArgs {
@@ -344,11 +363,17 @@ export interface ListLabeledArgs {
  * any user label filters to that label. Snippet-first like {@link search}.
  */
 export function listLabeled(ctx: ToolContext, args: ListLabeledArgs): WithMeta & { hits: HitShape[] } {
-  const rows = ctx.repo.messagesByLabel(args.label, {
+  // Accept a friendly label NAME as well as an id: resolve "Coverage Review" →
+  // Label_123… (scoped to the account when given) before the membership query.
+  const label =
+    (args.account ? ctx.repo.labelNameToId(args.account).get(args.label.toLowerCase()) : undefined) ??
+    args.label;
+  const rows = ctx.repo.messagesByLabel(label, {
     ...(args.account ? { account: args.account } : {}),
     limit: args.limit ?? 15,
   });
-  return withMeta(ctx.repo, args.account, { hits: rows.map(toHit) });
+  const render = labelRenderer(ctx.repo);
+  return withMeta(ctx.repo, args.account, { hits: rows.map((r) => toHit(r, render)) });
 }
 
 export interface RefreshInboxArgs {
@@ -409,7 +434,8 @@ export async function refreshInbox(ctx: ToolContext, args: RefreshInboxArgs): Pr
   }
 
   const rows = ctx.repo.messagesByLabel('INBOX', { account, limit });
-  return withMeta(ctx.repo, account, { refreshed, ...counts, hits: rows.map(toHit) });
+  const render = labelRenderer(ctx.repo);
+  return withMeta(ctx.repo, account, { refreshed, ...counts, hits: rows.map((r) => toHit(r, render)) });
 }
 
 export interface GetMessageArgs {
@@ -507,7 +533,7 @@ export async function getMessage(ctx: ToolContext, args: GetMessageArgs): Promis
     important: row.important === 1,
     isList: row.is_list === 1,
     direction: row.direction,
-    labels: parseLabels(row.labels_json),
+    labels: ctx.repo.labelNames(account, parseLabels(row.labels_json)),
     bodyState: row.body_state,
     summary: row.summary_text,
     body,
@@ -533,7 +559,8 @@ export interface ModifyLabelsArgs {
 /** Result shape both opt-in writers return. */
 export interface MutateToolResult {
   ref: string;
-  /** Resulting labels after the change, or null when the row is not indexed. */
+  /** Resulting labels after the change as human names (opaque ids rendered via
+   * the cached catalogue), or null when the row is not indexed. */
   labels: string[] | null;
   /** False when the provider write succeeded but no local row existed. */
   indexed: boolean;
@@ -565,7 +592,7 @@ async function mutateLabels(
     const result = await applyMailboxLabelChange({ account, id, source, repo: ctx.repo, change });
     return withMeta(ctx.repo, account, {
       ref: `${account}:${id}`,
-      labels: result.labels,
+      labels: result.labelNames,
       indexed: result.indexed,
     });
   } catch (err) {
@@ -638,10 +665,11 @@ export function getThread(
   if (!row && messages.length === 0) {
     throw new McpToolError(`thread ${account}:${id} is not in the index`);
   }
+  const render = labelRenderer(ctx.repo);
   return withMeta(ctx.repo, account, {
     thread: row ? toThread(row) : null,
     summary: row?.summary_text ?? null,
-    messages: messages.map(toHit),
+    messages: messages.map((m) => toHit(m, render)),
   });
 }
 
@@ -1081,11 +1109,12 @@ export function catchUp(ctx: ToolContext, args: CatchUpArgs): CatchUpResult {
       .all(q, account, sinceMs) as unknown as MessageRow[];
   }
 
+  const render = labelRenderer(ctx.repo);
   const base: CatchUpResult = withMeta(ctx.repo, account, {
     since_ms: sinceMs,
-    fromImportant: fromImportant.map(toHit),
-    inUserThreads: inUserThreads.map(toHit),
-    keywordHits: keywordHits.map(toHit),
+    fromImportant: fromImportant.map((r) => toHit(r, render)),
+    inUserThreads: inUserThreads.map((r) => toHit(r, render)),
+    keywordHits: keywordHits.map((r) => toHit(r, render)),
     bodies_command: handback('enrich', '--account', account, '--profile'),
   });
   return applyStaleSync(ctx, account, base);

@@ -155,6 +155,21 @@ export class InsufficientScopeError extends Error {
 }
 
 /**
+ * One provider label: its opaque id, its human-readable name, and whether the
+ * provider owns it ({@link MailSource.listLabels}). For Gmail, system labels
+ * (`INBOX`, `STARRED`, `CATEGORY_*`) have id === name; user labels have an
+ * opaque id (`Label_123…`) and a distinct display name.
+ */
+export interface ProviderLabel {
+  /** Provider label id, as it appears in a message's `labels` array. */
+  id: string;
+  /** Human-readable display name. */
+  name: string;
+  /** `system` | `user` when the provider distinguishes them. */
+  type?: string;
+}
+
+/**
  * A label mutation to apply to one message ({@link MailSource.modify}). Mirrors
  * the Gmail `messages.modify` body: ids to add and/or remove. Archive is just
  * `{ removeLabelIds: ['INBOX'] }`. Either field may be omitted/empty.
@@ -206,6 +221,14 @@ export interface MailSource {
 
   /** Fetch the full record (metadata + body) for one id, or null if missing. */
   getFull(id: string): Promise<MessageFull | null>;
+
+  /**
+   * List the mailbox's label catalogue (id → name → type). Optional: adapters
+   * that can't enumerate labels omit it, and label rendering falls back to raw
+   * ids. The result is small and stable; callers cache it (the index `labels`
+   * table, refreshed each sync) rather than calling per message.
+   */
+  listLabels?(): Promise<ProviderLabel[]>;
 
   /**
    * OPT-IN mutation seam (the ONLY method that writes to the mailbox). Apply a

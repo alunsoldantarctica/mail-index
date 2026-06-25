@@ -27,6 +27,7 @@ const TABLES = [
   'contact_stats_snapshot',
   'sync_runs',
   'account_identity',
+  'labels',
 ];
 
 test('migrations run clean on a fresh db and create every PLAN §6 table', () => {

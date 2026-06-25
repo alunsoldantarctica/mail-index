@@ -24,6 +24,7 @@ import { GogAdapter } from '../source/adapters/gog/index.js';
 import type { MailScope, MailSource } from '../source/index.js';
 import { syncMetadata, type SyncResult } from '../ingest/sync.js';
 import { reconcileInbox } from '../ingest/reconcile-inbox.js';
+import { syncLabels } from '../ingest/sync-labels.js';
 import { buildGraph } from '../graph/index.js';
 
 /** CLI-supplied sync flags (already parsed; all optional). */
@@ -142,6 +143,15 @@ export async function runSyncOne(
     } catch {
       // Membership freshness is best-effort; the index stays usable without it.
     }
+  }
+
+  // Label catalogue refresh (id → human name): cache the small, stable label map
+  // so display can show names instead of opaque ids and writes can resolve a
+  // name → id. Like the reconcile, INDEX-ONLY and never allowed to fail a sync.
+  try {
+    await syncLabels({ account: label, source, repo });
+  } catch {
+    // Best-effort; a stale/absent catalogue just falls back to raw label ids.
   }
 
   // D10: auto graph build after a full/initial sync only. Derived + lazy (D8):

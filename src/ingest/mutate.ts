@@ -37,8 +37,11 @@ export interface MutateInput {
 export interface MutateResult {
   account: string;
   id: string;
-  /** Resulting labels after the change, when the message is in the index. */
+  /** Resulting label ids after the change, when the message is in the index. */
   labels: string[] | null;
+  /** {@link labels} rendered to human names (opaque ids → names via the cached
+   * catalogue; system labels/unknowns pass through). Null when not indexed. */
+  labelNames: string[] | null;
   /** False when the provider write succeeded but no local row existed to update. */
   indexed: boolean;
 }
@@ -58,16 +61,34 @@ export async function applyLabelChange(input: MutateInput): Promise<MutateResult
     );
   }
 
+  // Resolve friendly label NAMES → ids before the provider write. A user may
+  // pass "Coverage Review" instead of Label_123…; the gws REST path requires the
+  // id (gog accepts either). System labels (INBOX/STARRED), raw ids, and unknown
+  // strings have no name entry and pass through unchanged. Both add + remove.
+  const nameToId = repo.labelNameToId(account);
+  const add = resolveNames(change.addLabelIds ?? [], nameToId);
+  const remove = resolveNames(change.removeLabelIds ?? [], nameToId);
+
+  // Minimal payload — only the non-empty side(s), so archive stays
+  // `{ removeLabelIds: ['INBOX'] }`.
+  const resolved: LabelChange = {};
+  if (add.length > 0) resolved.addLabelIds = add;
+  if (remove.length > 0) resolved.removeLabelIds = remove;
+
   // Provider write FIRST (may throw InsufficientScopeError on a readonly grant).
-  await source.modify(id, change);
+  await source.modify(id, resolved);
 
   // Then reflect it locally so search/recall stay consistent before next sync.
-  const labels = repo.applyLabelChange(account, id, {
-    add: change.addLabelIds ?? [],
-    remove: change.removeLabelIds ?? [],
-  });
+  const labels = repo.applyLabelChange(account, id, { add, remove });
+  const labelNames = labels ? repo.labelNames(account, labels) : null;
 
-  return { account, id, labels, indexed: labels !== null };
+  return { account, id, labels, labelNames, indexed: labels !== null };
+}
+
+/** Map any label that matches a known name (case-insensitive) to its id; pass
+ * system labels, raw ids, and unknown strings through unchanged. */
+function resolveNames(labels: readonly string[], nameToId: Map<string, string>): string[] {
+  return labels.map((l) => nameToId.get(l.toLowerCase()) ?? l);
 }
 
 /** Archive = drop the INBOX label. The one well-known compound. */
