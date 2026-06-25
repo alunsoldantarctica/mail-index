@@ -452,9 +452,10 @@ Measured on a real 6-month, ~8,000-message mailbox:
 - **Local-first.** The index, bodies, and profile never leave your machine. No
   telemetry, no account, no cloud
   ([ADR-0002](adr/0002-local-index-only-for-privacy.md)).
-- **Read-only on the mailbox.** The tool never sends, deletes, labels, or
-  archives. "Read-only" means *never mutates* — fetching message content is
-  permitted.
+- **Read-only on the mailbox by default.** The tool never sends or deletes.
+  Archive + label edits are an explicit opt-in (`--enable-writes`, least-
+  privilege `gmail.modify`); without it the install is read-only at the token
+  level. Fetching message content is always permitted.
 - The index DB contains message text — treat
   `${XDG_DATA_HOME:-~/.local/share}/mail-index/` as sensitive. Optional at-rest
   encryption (OS-level FileVault / full-disk encryption) is recommended; the

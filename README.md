@@ -172,8 +172,15 @@ mail-index compact [--account <a>] [--now]   Demote summarized bulk bodies (ADR-
 mail-index search  <terms> [--account <a>] [--limit N] [--enrich]
 mail-index show    <account:message-id>  Print a message (auto-enriches a meta row)
 mail-index open    <account:message-id>  Print the provider web URL (no fetch)
+mail-index archive <account:message-id>  Archive (drop INBOX) — opt-in write; needs gmail.modify
+mail-index label   <account:message-id> [--add <l>]... [--remove <l>]...  Opt-in write; needs gmail.modify
 mail-index status  [--json]              Per-account freshness + counts
 ```
+
+Writes are off by default. Enable archive + label edits for an account with
+`mail-index setup --account <email> --enable-writes` (or the bundled
+`scripts/enable-writes.sh <email>`) — a least-privilege `gmail.modify` grant
+(never send or delete). See [ADR-0007](docs/adr/0007-opt-in-mailbox-writes.md).
 
 ## Documentation
 

@@ -96,7 +96,8 @@ and used only as a real-world test of the generic tool.
 7. **Ship as OSS** — own repo, license, docs, clean onboarding.
 
 ### Non-goals (v1)
-- Not an email client; never sends mail, never mutates the mailbox.
+- Not an email client; never sends or deletes mail. Mutation is limited to the
+  opt-in archive + label-edit writers (ADR-0007), off by default.
 - No server, no cloud, no account — strictly local.
 - No embeddings/topic clustering (deferred).
 - No cross-person identity resolution in v1 (deferred).
@@ -158,7 +159,7 @@ Resolved during design review. Each is a one-line decision + the reasoning.
 | D12 | **`engagement_score` from current-state aggregates each sync + append-only snapshots from day one.** | Gmail exposes only current `UNREAD`, never a read timestamp; we engineer the temporal axis ourselves. Snapshots make trend a v1.1 *query*, not a migration. |
 | D13 | **The score is a *seed for human curation*, not an autonomous fetch trigger.** | Machine ranks, human disposes. The curated profile is the source of truth that opens the body-fetch floodgate. |
 | D14 | **Curation is agent-mediated (primary) + a minimal CLI wizard (fallback); MCP elicitation deferred.** | The agent is the UI — exactly the product thesis. Elicitation client-support is too immature to depend on in v1. |
-| D15 | **Local-first, read-only on the mailbox, no network beyond the provider API.** | Privacy posture. The tool never sends or mutates mail. |
+| D15 | **Local-first, read-only on the mailbox by default, no network beyond the provider API.** | Privacy posture. The tool never sends or deletes mail; archive + label edits are opt-in only (ADR-0007). |
 
 ---
 
@@ -404,8 +405,9 @@ mail-index mcp                                    # = mail-index-mcp (server)
 
 - **Local-first.** The index, bodies, and profile never leave the machine. No
   telemetry, no account, no cloud.
-- **Read-only on the mailbox.** The tool never sends, deletes, labels, or
-  archives. Provider scope can be read-only where the adapter supports it.
+- **Read-only on the mailbox by default.** The tool never sends or deletes.
+  Archive + label edits are opt-in (ADR-0007), gated on a `gmail.modify` grant;
+  provider scope stays read-only otherwise.
 - **Secret hygiene.** OAuth tokens/credentials are the adapter's concern and live
   in the provider tool's own store, never in this repo or the index DB. The DB
   itself contains message text — treat `~/.local/share/mail-index/` as sensitive;

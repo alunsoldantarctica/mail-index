@@ -7,8 +7,9 @@ description: >-
   bills; bookings, flights, hotels, travel; "find the email about X", "the message
   from <person/company>", a confirmation/booking/tracking number; who emailed me
   about X, a contact's address; newsletters/digests; "what did I miss / catch me
-  up". Drives the local, read-only mail-index MCP server (Gmail recall on the
-  user's machine — it never sends or changes mail).
+  up". Drives the local mail-index MCP server (Gmail recall on the user's
+  machine — read-only by default; it never sends or deletes mail, and only
+  archives/relabels when the user has opted into writes).
 ---
 
 # mail-index — recall over the user's mailbox
@@ -65,8 +66,10 @@ depends on very recent mail, check `sync_status` and mention staleness.
   `get_message level:"body"` sparingly.
 - **Scope when you can.** Pass `account` if the user has multiple mailboxes;
   pass a tighter `query` before widening.
-- **Read-only.** mail-index never sends, labels, or deletes — for those, use a
-  separate Gmail tool.
+- **Read-only by default.** mail-index never sends or deletes. It CAN archive
+  and relabel via `archive_message` / `modify_labels`, but only when the user
+  opted into the `gmail.modify` scope — call those two only when the user
+  explicitly asks; for send/delete, use a separate Gmail tool.
 - **Bulk work is handed back as a CLI command.** Some tools return a `mail-index …`
   command string for the user to run (sync, graph build, bulk enrich) rather than
   doing O(N) work inline — surface that command, don't try to loop it yourself.
