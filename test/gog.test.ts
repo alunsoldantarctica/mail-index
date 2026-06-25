@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 
 import { runMailSourceContract } from '../dist/source/contract.js';
 import { GogAdapter } from '../dist/source/adapters/gog/index.js';
+import { InsufficientScopeError } from '../dist/source/index.js';
 import {
   GOG_CONTRACT_FIXTURES,
   makeGogFixtureRunner,
@@ -95,4 +96,50 @@ test('GogAdapter check() fails with a gog-auth hint for an unauthorized account'
   const identity = await adapter.check();
   assert.equal(identity.ok, false);
   assert.match(identity.reason ?? '', /gog auth add nobody@example\.com --gmail-scope=readonly/);
+});
+
+test('GogAdapter.modify builds the gmail messages modify argv (add + remove)', async () => {
+  let captured: readonly string[] = [];
+  const adapter = new GogAdapter({
+    account: 'al@example.com',
+    runner: (args) => {
+      captured = args;
+      return Promise.resolve({});
+    },
+  });
+  await adapter.modify('msg-1', { addLabelIds: ['STARRED', 'Work'], removeLabelIds: ['INBOX'] });
+  assert.deepEqual(captured, [
+    'gmail', 'messages', 'modify', 'msg-1', '-a', 'al@example.com',
+    '--add', 'STARRED,Work', '--remove', 'INBOX',
+  ]);
+});
+
+test('GogAdapter.modify is a no-op (no spawn) when nothing to add or remove', async () => {
+  let called = false;
+  const adapter = new GogAdapter({
+    account: 'al@example.com',
+    runner: () => {
+      called = true;
+      return Promise.resolve({});
+    },
+  });
+  await adapter.modify('msg-1', { addLabelIds: [''], removeLabelIds: [] });
+  assert.equal(called, false, 'an empty change must not reach the provider');
+});
+
+test('GogAdapter.modify maps an insufficient-scope failure to InsufficientScopeError', async () => {
+  const adapter = new GogAdapter({
+    account: 'al@example.com',
+    runner: () =>
+      Promise.reject(new Error('gog exited 1: 403 Request had insufficient authentication scopes')),
+  });
+  await assert.rejects(
+    () => adapter.modify('msg-1', { removeLabelIds: ['INBOX'] }),
+    (err) => {
+      assert.ok(err instanceof InsufficientScopeError);
+      assert.match(err.message, /gmail\.modify/);
+      assert.match(err.remedy, /gog auth add al@example\.com .*gmail\.modify/);
+      return true;
+    },
+  );
 });

@@ -37,6 +37,11 @@ CI fails if any network primitive (`fetch`, `node:http/https/net`, a network
 library, a telemetry SDK) appears anywhere in `src/`, or if a process is spawned
 outside the audited seams (the adapter, and the MCP server's detached re-exec
 of mail-index's own `sync` CLI per [ADR-0005](adr/0005-stale-reads-trigger-background-sync.md)).
+This guard governs *network egress and spawn seams* — not read-vs-mutate. The
+opt-in archive/label writes ([ADR-0007](adr/0007-opt-in-mailbox-writes.md)) flow
+through the *same* adapter spawn seam, so they pass the guard unchanged; whether
+a write can happen at all is enforced one layer up, at the OAuth scope (a default
+`gmail.readonly` grant cannot mutate).
 
 **One auditable self-update seam, quarantined outside the core.** The launch
 shim (`bin/`) performs an optional, throttled (once / 24h), opt-out self-update
@@ -53,10 +58,14 @@ launcher that fires it. Disable entirely with `MAIL_INDEX_NO_AUTOUPDATE=1`.
 - **No exfiltration by the tool.** It has no network egress of its own and no
   telemetry/analytics — verifiable by the egress guard and a 4-package, pure-JS
   dependency tree.
-- **No mailbox mutation.** Read-only by construction: the adapter calls only
-  `messages.list` / `messages.get`; the MCP server exposes **no** send/label/
-  delete/archive tools ([ADR-0001](adr/0001-inline-enrichment-is-o1-only.md), §14
-  of [PLAN.md](PLAN.md)).
+- **No mailbox mutation by default — and never send/delete.** A standard install
+  is read-only at the token level (`gmail.readonly`): the adapter calls only
+  `messages.list` / `messages.get`, and the mutation seam is unreachable.
+  Archive + label edits are an explicit OPT-IN gated on a separate, least-
+  privilege `gmail.modify` re-auth (`mail-index setup --enable-writes`), exposed
+  as two clearly-marked tools (`archive_message` / `modify_labels`). Even opted
+  in, the tool can only archive/relabel — it requests no `gmail.send` and no
+  delete scope ([ADR-0007](adr/0007-opt-in-mailbox-writes.md), [ADR-0001](adr/0001-inline-enrichment-is-o1-only.md)).
 - **No credential handling.** Tokens are the adapter's concern, never stored by
   mail-index or written to the index DB.
 - **Local-only data.** The index never leaves the machine; no cloud, account, or

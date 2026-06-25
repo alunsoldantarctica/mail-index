@@ -9,9 +9,14 @@ mailbox. Its design reflects that.
   live in a single SQLite file on your machine
   (`${XDG_DATA_HOME:-~/.local/share}/mail-index/mail.sqlite`) and never leave it.
   No cloud, no account, no telemetry, no hosted option ([ADR-0002](docs/adr/0002-local-index-only-for-privacy.md)).
-- **Read-only on the mailbox.** The tool never sends, deletes, labels, or archives
-  mail. Its only provider traffic is read fetches; the MCP server exposes no
-  mutation tools ([PLAN §14](docs/PLAN.md)).
+- **Read-only on the mailbox by default.** A standard install never sends,
+  deletes, labels, or archives mail — its only provider traffic is read fetches,
+  and it is read-only at the token level (`gmail.readonly`, see below). The tool
+  never sends or deletes mail at all. Archive + label edits are an explicit
+  OPT-IN: they exist only after you re-authorize with the least-privilege
+  `gmail.modify` scope (`mail-index setup --enable-writes`), and are exposed as
+  two clearly-marked tools/commands — `archive_message`/`modify_labels` and
+  `mail-index archive`/`label` ([ADR-0007](docs/adr/0007-opt-in-mailbox-writes.md)).
 - **No third-party calls, no bundled LLM.** All language work (summaries,
   categorization) is done by *your* agent via MCP and written back; the tool
   itself calls no inference API ([ADR-0004](docs/adr/0004-all-intelligence-from-the-users-llm.md)).
@@ -37,11 +42,19 @@ provider tool's own store (for the gws adapter, its per-account config dir) —
 never in this repo and never in the index DB. Never paste tokens into issues
 or PRs.
 
-Because mail-index only ever **reads**, grant the adapter a **read-only**
+By default mail-index only ever **reads**, so grant the adapter a **read-only**
 provider scope. For Gmail that's
 `https://www.googleapis.com/auth/gmail.readonly` — sufficient for everything the
-tool does, and it makes "this can't modify my mail" true at the token level, not
-just by convention.
+default tool does, and it makes "this can't modify my mail" true at the token
+level, not just by convention.
+
+If you opt into archive + label edits (`mail-index setup --enable-writes`), the
+adapter additionally requests the least-privilege
+`https://www.googleapis.com/auth/gmail.modify` scope — which permits archiving
+and relabelling but **not** sending or permanently deleting mail. We never
+request `gmail.send` or full `https://mail.google.com/`. Writes still flow
+through the same audited adapter seam, so the local-only / zero-egress guarantee
+below is unaffected.
 
 ## Don't trust us — verify
 

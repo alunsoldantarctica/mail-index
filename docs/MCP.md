@@ -47,8 +47,10 @@ whether to trust a time-sensitive answer.
 
 ### Command handbacks — O(N) work is never inline
 
-The server is **read-only on the mailbox** ([D15](PLAN.md)). The single
-permitted provider contact is `get_message`'s one inline O(1) body fetch
+The server is **read-only on the mailbox by default** ([D15](PLAN.md)) — the
+exceptions are the two opt-in writers `archive_message` / `modify_labels`
+([ADR-0007](adr/0007-opt-in-mailbox-writes.md)). The single permitted read-side
+provider contact is `get_message`'s one inline O(1) body fetch
 ([ADR-0001](adr/0001-inline-enrichment-is-o1-only.md)). Anything bulk — sync,
 bulk enrich, graph build, compact — is returned as a **command handback**: the
 exact `mail-index` CLI command string the agent runs itself. The CLI is the
@@ -112,9 +114,10 @@ All of the above also carry `index_as_of` on the top-level response object.
 
 ## Tools
 
-The full surface is **18 tools**. Account resolution: tools that need an account
-take an optional `account`; when omitted and exactly one account is configured /
-indexed, it is used, otherwise the tool errors asking for one.
+The full surface is **23 tools** — 21 read-only, plus the two opt-in writers
+`archive_message` / `modify_labels`. Account resolution: tools that need an
+account take an optional `account`; when omitted and exactly one account is
+configured / indexed, it is used, otherwise the tool errors asking for one.
 
 ### Primitives
 
@@ -368,6 +371,37 @@ unread/unsummarized issue counts — the digest routine worklist. The loop:
 | `account` | string | |
 
 Returns `{ sources, read_command, sync_started?, eta_seconds?, index_as_of }`.
+
+### Opt-in writers (mutate the mailbox)
+
+These two are the **only** tools that change the mailbox. They require a
+`gmail.modify`-capable grant (a default `gmail.readonly` install refuses them
+with a re-auth hint) and should be called only when the user explicitly asks to
+archive or relabel. Never send or delete. See
+[ADR-0007](adr/0007-opt-in-mailbox-writes.md).
+
+#### `archive_message`
+Archive one message — removes its `INBOX` label.
+
+| Arg | Type | Notes |
+|-----|------|-------|
+| `ref` | string (required) | `<account>:<message-id>` |
+
+Returns `{ ref, labels, indexed, index_as_of }` (`labels` = the resulting label
+set; `indexed: false` if the message was not in the local index).
+
+#### `modify_labels`
+Add and/or remove labels on one message (system ids like `STARRED`/`UNREAD`, or
+existing user-label **names**; creating new labels is not supported).
+
+| Arg | Type | Notes |
+|-----|------|-------|
+| `ref` | string (required) | `<account>:<message-id>` |
+| `add` | string[] | label ids/names to add |
+| `remove` | string[] | label ids/names to remove |
+
+At least one of `add` / `remove` is required. Returns
+`{ ref, labels, indexed, index_as_of }`.
 
 ---
 

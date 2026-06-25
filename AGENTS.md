@@ -55,7 +55,7 @@ Any client that speaks MCP over stdio works — point it at the `mail-index-mcp`
 command (or `node dist/mcp/index.js`). Use the same `env.PATH` note as above so
 the adapter CLI (e.g. `gws`) is resolvable for inline body fetches.
 
-Verify: ask the agent *"what mail-index tools do you have?"* — you should see 18,
+Verify: ask the agent *"what mail-index tools do you have?"* — you should see 23,
 and *"what's the status of my mail index?"* should return per-account counts.
 
 ---
@@ -91,8 +91,11 @@ questions. Prefer:
   (`catch_up`, `digest_sources`) return current data immediately and may report
   `sync_started: true` with `eta_seconds`; re-call after the ETA for fresher
   results, or check `sync_status()`.
-- **Read-only.** There are no send/label/delete tools, by design. To act on mail,
-  use the provider directly — mail-index never mutates the mailbox.
+- **Read-only by default; two opt-in writers.** There are no send or delete
+  tools, ever. The only mailbox-mutating tools are `archive_message` and
+  `modify_labels` — and they work ONLY if the user opted into the `gmail.modify`
+  scope (a default install refuses them with a re-auth hint). Use them only when
+  the user explicitly asks to archive or relabel; everything else is read-only.
 
 **The personalized-digest pattern** (e.g. a scheduled routine): call
 `digest_sources(since)` → `get_message` each issue → `save_summary` each →

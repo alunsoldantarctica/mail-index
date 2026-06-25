@@ -11,10 +11,14 @@
  *
  * Binding constraints these tools honour:
  *
- *  - **READ-ONLY on the mailbox (D15).** Every tool reads the LOCAL index. The
- *    one permitted provider contact is `get_message`'s single O(1) inline enrich
- *    of a still-`meta` row (ADR-0001) — and even that is gated on a source being
- *    wired in.
+ *  - **READ-ONLY on the mailbox BY DEFAULT (D15).** Every recall tool reads the
+ *    LOCAL index. The one permitted read-side provider contact is
+ *    `get_message`'s single O(1) inline enrich of a still-`meta` row (ADR-0001).
+ *    The ONLY mailbox-mutating tools are the two OPT-IN writers `archive_message`
+ *    and `modify_labels` — both require a `gmail.modify` grant (the default
+ *    `gmail.readonly` install refuses them with the exact re-auth command) and
+ *    are reached only when the user has explicitly opted into writes
+ *    (docs/adr/0007-opt-in-mailbox-writes.md).
  *  - **O(N) → COMMAND HANDBACK (ADR-0001).** Anything bulk (sync, bulk enrich,
  *    graph build, compact) is NEVER run inline; the tool returns the exact
  *    `mail-index` CLI command string the agent runs itself (CONTEXT.md "Command
@@ -43,7 +47,13 @@ import type {
   ContactSort,
   GraphNeighborRow,
 } from '../index/index.js';
-import type { MailSource } from '../source/index.js';
+import type { LabelChange, MailSource } from '../source/index.js';
+import { InsufficientScopeError } from '../source/index.js';
+import {
+  applyLabelChange as applyMailboxLabelChange,
+  archiveChange,
+  MailboxWriteUnsupportedError,
+} from '../ingest/mutate.js';
 import type { Curation } from '../index/schema.js';
 import { CURATIONS } from '../index/schema.js';
 import { enrichOne } from '../ingest/enrich.js';
@@ -506,6 +516,92 @@ export async function getMessage(ctx: ToolContext, args: GetMessageArgs): Promis
     needsOcr,
     enriched,
   });
+}
+
+/** Arguments for `archive_message`. */
+export interface ArchiveMessageArgs {
+  ref: string;
+}
+
+/** Arguments for `modify_labels`. */
+export interface ModifyLabelsArgs {
+  ref: string;
+  add?: string[];
+  remove?: string[];
+}
+
+/** Result shape both opt-in writers return. */
+export interface MutateToolResult {
+  ref: string;
+  /** Resulting labels after the change, or null when the row is not indexed. */
+  labels: string[] | null;
+  /** False when the provider write succeeded but no local row existed. */
+  indexed: boolean;
+}
+
+/**
+ * Shared core for the two OPT-IN writers. Resolves the account, builds its
+ * adapter via the {@link ToolContext.buildSource} seam, and runs the one
+ * provider-write path. Translates the typed write errors into a
+ * {@link McpToolError} carrying the exact re-auth command so the agent can relay
+ * it. NEVER reached by the read tools.
+ */
+async function mutateLabels(
+  ctx: ToolContext,
+  ref: string,
+  change: LabelChange,
+): Promise<MutateToolResult & WithMeta> {
+  const { account, id } = parseToolRef(ref);
+  const accCfg = ctx.config.accounts[account];
+  if (!accCfg) {
+    throw new McpToolError(`unknown account "${account}" — not in the operator config`);
+  }
+  if (!ctx.buildSource) {
+    throw new McpToolError('mailbox writes are not available in this server context');
+  }
+
+  const source = ctx.buildSource(accCfg);
+  try {
+    const result = await applyMailboxLabelChange({ account, id, source, repo: ctx.repo, change });
+    return withMeta(ctx.repo, account, {
+      ref: `${account}:${id}`,
+      labels: result.labels,
+      indexed: result.indexed,
+    });
+  } catch (err) {
+    if (err instanceof InsufficientScopeError || err instanceof MailboxWriteUnsupportedError) {
+      throw new McpToolError(err.message);
+    }
+    throw err;
+  }
+}
+
+/**
+ * `archive_message` — OPT-IN write. Archive one message (drop its `INBOX`
+ * label). Mutates the mailbox; requires a `gmail.modify` grant.
+ */
+export function archiveMessage(
+  ctx: ToolContext,
+  args: ArchiveMessageArgs,
+): Promise<MutateToolResult & WithMeta> {
+  return mutateLabels(ctx, args.ref, archiveChange());
+}
+
+/**
+ * `modify_labels` — OPT-IN write. Add and/or remove Gmail labels on one message
+ * (system ids like `STARRED`/`UNREAD`, or existing user-label names). Creating
+ * new labels is not supported. Mutates the mailbox; requires `gmail.modify`.
+ */
+export async function modifyLabels(
+  ctx: ToolContext,
+  args: ModifyLabelsArgs,
+): Promise<MutateToolResult & WithMeta> {
+  const add = (args.add ?? []).filter((s) => s.trim() !== '');
+  const remove = (args.remove ?? []).filter((s) => s.trim() !== '');
+  if (add.length === 0 && remove.length === 0) {
+    throw new McpToolError('modify_labels requires at least one label in "add" or "remove"');
+  }
+  return mutateLabels(ctx, args.ref, { addLabelIds: add, removeLabelIds: remove });
 }
 
 /**

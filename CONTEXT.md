@@ -45,9 +45,13 @@ An MCP tool response containing the exact `mail-index` CLI command the agent
 should run to obtain content the server won't fetch inline. The CLI is the
 execution engine; the MCP is the brain that knows which command to run.
 
-**Read-only**:
-The tool never mutates the mailbox (no send, label, archive, delete). Fetching
-message content is permitted — read-only does not mean offline.
+**Read-only by default**:
+By default the tool never mutates the mailbox, and never sends or deletes mail at
+all. Fetching message content is permitted — read-only does not mean offline.
+Two mutations — archive (drop INBOX) and label edit (add/remove labels) — are an
+explicit OPT-IN gated on a least-privilege `gmail.modify` re-auth
+(`mail-index setup --enable-writes`); they flow through the same adapter seam and
+never touch the local-only / zero-egress guarantee (ADR-0007).
 
 **Interest profile**:
 The user-curated policy (important/muted contacts and domains + freeform

@@ -76,6 +76,12 @@ export interface SetupOptions {
   since?: string;
   /** Skip the first sync (config-only onboarding). */
   noSync?: boolean;
+  /**
+   * Opt into mailbox writes (archive + label edit). Requests the least-privilege
+   * `gmail.modify` scope IN ADDITION to readonly — never send/delete. Off by
+   * default: the standard install stays read-only at the token level.
+   */
+  enableWrites?: boolean;
   /** Emit structured step records instead of human prose (agent/GUI mode). */
   json?: boolean;
   /** Override the config path (tests). */
@@ -140,9 +146,14 @@ function readBundledClientFromDisk(clientPath?: string): string | null {
   return existsSync(bundled) ? readFileSync(bundled, 'utf8') : null;
 }
 
-/** Build the `gog auth add` command for an account (read-only Gmail scope). */
-export function authAddArgs(account: string): string[] {
-  return [
+/**
+ * Build the `gog auth add` command for an account. Read-only Gmail scope by
+ * default; with `enableWrites` it ALSO requests the least-privilege
+ * `gmail.modify` scope (archive + label edit — never send/delete), keeping the
+ * readonly base so the granted set is exactly read + modify.
+ */
+export function authAddArgs(account: string, enableWrites = false): string[] {
+  const args = [
     'auth',
     'add',
     account,
@@ -152,6 +163,14 @@ export function authAddArgs(account: string): string[] {
     'gmail',
     '--gmail-scope=readonly',
   ];
+  if (enableWrites) {
+    args.push('--extra-scopes=https://www.googleapis.com/auth/gmail.modify');
+    // Upgrading an already-readonly account: gog reuses the stored refresh token
+    // and would NOT re-consent for the broader scope without this — the upgrade
+    // would silently no-op. Forcing consent is harmless on a fresh auth too.
+    args.push('--force-consent');
+  }
+  return args;
 }
 
 /** Build the `gog auth list -j` command (machine-readable, for the check). */
@@ -345,27 +364,34 @@ export async function runSetup(opts: SetupOptions, deps: SetupDeps): Promise<Set
   // (4) Authenticate the mailbox (CHECK then ACT). The browser consent is a
   // HUMAN step: in --json mode emit it as an action rather than blocking.
   if (adapter === 'gog') {
+    const enableWrites = opts.enableWrites ?? false;
+    const scopeLabel = enableWrites ? 'read + write (gmail.modify)' : 'read-only';
+    const consentLabel = enableWrites
+      ? 'opens a browser for read + WRITE (archive/label) Gmail consent'
+      : 'opens a browser for read-only Gmail consent';
     const listed = deps.run('gog', authListArgs());
     const authed = listed.code === 0 && accountIsAuthed(listed.stdout, label);
-    if (authed) {
+    // --enable-writes always (re)runs auth add so an already-readonly account is
+    // upgraded to the modify scope (gog auth add is idempotent and re-consents).
+    if (authed && !enableWrites) {
       steps.push({ step: 'auth', status: 'ok', detail: `${label} already authenticated` });
     } else if (opts.json) {
       steps.push({
         step: 'auth',
         status: 'action',
-        detail: `Authenticate ${label} (opens a browser for read-only Gmail consent).`,
-        command: `gog ${authAddArgs(label).join(' ')}`,
+        detail: `Authenticate ${label} (${consentLabel}).`,
+        command: `gog ${authAddArgs(label, enableWrites).join(' ')}`,
       });
     } else {
-      const res = deps.run('gog', authAddArgs(label));
+      const res = deps.run('gog', authAddArgs(label, enableWrites));
       steps.push(
         res.code === 0
-          ? { step: 'auth', status: 'done', detail: `${label} authenticated (read-only)` }
+          ? { step: 'auth', status: 'done', detail: `${label} authenticated (${scopeLabel})` }
           : {
               step: 'auth',
               status: 'action',
               detail: `gog auth add failed (exit ${res.code}): ${res.stderr.trim()}`,
-              command: `gog ${authAddArgs(label).join(' ')}`,
+              command: `gog ${authAddArgs(label, enableWrites).join(' ')}`,
             },
       );
     }

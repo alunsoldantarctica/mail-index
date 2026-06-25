@@ -44,6 +44,8 @@ import {
   syncStatus,
   catchUp,
   digestSources,
+  archiveMessage,
+  modifyLabels,
   McpToolError,
   type ToolContext,
 } from './tools.js';
@@ -69,6 +71,7 @@ interface ToolDef {
 const str = { type: 'string' as const };
 const num = { type: 'integer' as const };
 const bool = { type: 'boolean' as const };
+const strArr = { type: 'array' as const, items: { type: 'string' as const } };
 
 function obj(
   properties: Record<string, unknown>,
@@ -78,11 +81,13 @@ function obj(
 }
 
 /**
- * The full PLAN §12 surface — 18 tools (14 primitives incl. curation's three
- * propose/set/get and categorization's two, plus the two composites). Every entry advertises a compact
- * input schema and dispatches to the pure engine. Descriptions tell the agent
- * the recall-first, token-conscious contract (compact shapes, handbacks for
- * bulk work, `index_as_of` on every response).
+ * The full PLAN §12 surface — 23 tools: 21 read-only (recall primitives,
+ * curation/categorization write-back, composites incl. list_labeled/
+ * refresh_inbox) plus the two OPT-IN mailbox writers archive_message /
+ * modify_labels (ADR-0007). Every entry advertises a compact input schema and
+ * dispatches to the pure engine. Descriptions tell the agent the recall-first,
+ * token-conscious contract (compact shapes, handbacks for bulk work,
+ * `index_as_of` on every response).
  */
 export const TOOLS: ToolDef[] = [
   // ---- primitives ----
@@ -326,6 +331,26 @@ export const TOOLS: ToolDef[] = [
       'Newsletter/list senders ranked by engagement + interest, with unread/unsummarized issue counts — the digest routine worklist. Stale index returns now and spawns a background sync.',
     inputSchema: obj({ since: str, account: str }),
     run: (ctx, a) => digestSources(ctx, { ...optStr(a, 'since'), ...optStr(a, 'account') }),
+  },
+  // ---- opt-in writers (the ONLY mailbox-mutating tools; need gmail.modify) ----
+  {
+    name: 'archive_message',
+    description:
+      'OPT-IN WRITE — MUTATES the mailbox. Archive one message (remove its INBOX label), given its <account:message-id> ref. Requires a gmail.modify grant; the default read-only install refuses with the exact re-auth command. Use only when the user explicitly asked to archive.',
+    inputSchema: obj({ ref: str }, ['ref']),
+    run: (ctx, a) => archiveMessage(ctx, { ref: String(a['ref']) }),
+  },
+  {
+    name: 'modify_labels',
+    description:
+      'OPT-IN WRITE — MUTATES the mailbox. Add and/or remove Gmail labels on one message (system ids like STARRED/UNREAD, or existing user-label NAMES; creating new labels is not supported). Requires a gmail.modify grant; the default read-only install refuses with the exact re-auth command. Use only when the user explicitly asked to change labels.',
+    inputSchema: obj({ ref: str, add: strArr, remove: strArr }, ['ref']),
+    run: (ctx, a) =>
+      modifyLabels(ctx, {
+        ref: String(a['ref']),
+        ...(Array.isArray(a['add']) ? { add: (a['add'] as unknown[]).map(String) } : {}),
+        ...(Array.isArray(a['remove']) ? { remove: (a['remove'] as unknown[]).map(String) } : {}),
+      }),
   },
 ];
 

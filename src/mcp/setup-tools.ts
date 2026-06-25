@@ -2,7 +2,7 @@
  * MCP SETUP-MODE tools (the self-bootstrapping reduced surface).
  *
  * When the server starts with NO operator config (a first-run install), it
- * cannot serve the 18 read-only recall tools — there is no index to read. Rather
+ * cannot serve the full recall surface — there is no index to read. Rather
  * than exit with an error (the old behaviour), it serves this small, advisory
  * surface so the agent/user can self-onboard from inside the MCP session.
  *

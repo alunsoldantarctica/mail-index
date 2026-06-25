@@ -59,7 +59,24 @@ Prefer source? `git clone` the repo, `pnpm install && pnpm build`, and invoke as
 Reading Gmail needs a Google **OAuth client**. mail-index gives you **two ways**
 to get one — pick whichever fits. Both end with the same thing: an adapter
 authenticated against your mailbox with **read-only** Gmail scope
-(`gmail.readonly`). mail-index never mutates the mailbox.
+(`gmail.readonly`). mail-index does not mutate the mailbox by default.
+
+> **Optional: archive + label edits.** If you want mail-index to archive
+> messages or edit labels, opt in to the least-privilege `gmail.modify` scope
+> (read + modify only — never send or delete). Two ways:
+>
+> - **At onboarding:** add `--enable-writes` to `mail-index setup`.
+> - **For an already-onboarded account:** run the bundled helper
+>   `scripts/enable-writes.sh <account-email>` (a copy-safe wrapper around the
+>   gog re-consent — handy because the raw scope flag is long and easy to
+>   mangle when pasting).
+>
+> Either unlocks the `mail-index archive`/`label` commands and the
+> `archive_message`/`modify_labels` MCP tools. Leave it off to stay read-only at
+> the token level. **gws-adapter** accounts use whatever scope their own gws
+> config grants — if that already includes a Gmail modify scope (`gmail.modify`
+> or `https://mail.google.com/`), writes work with no extra step. See
+> [ADR-0007](adr/0007-opt-in-mailbox-writes.md).
 
 | | **Option A — mail-index beta client** | **Option B — your own Google Cloud client** |
 |---|---|---|
@@ -326,9 +343,11 @@ server fails to start or `get_message` can't enrich:
   (e.g. `gws`). Add the directory holding that binary to the server's `env.PATH`
   (above) so the app can find it. Restart the desktop app after editing the config.
 
-The server is **read-only on the mailbox**: the only provider contact it ever
-makes is `get_message`'s single inline body fetch
-([ADR-0001](adr/0001-inline-enrichment-is-o1-only.md)). Everything bulk (sync,
+The server is **read-only on the mailbox by default**: the only provider contact
+it makes is `get_message`'s single inline body fetch
+([ADR-0001](adr/0001-inline-enrichment-is-o1-only.md)) — unless you opted into
+writes (`--enable-writes`), which adds the two mutating tools `archive_message`
+and `modify_labels` ([ADR-0007](adr/0007-opt-in-mailbox-writes.md)). Everything bulk (sync,
 enrich, graph build, compact) is returned to the agent as a **command
 handback** — the exact `mail-index` CLI command for the agent to run itself. See
 [MCP.md](MCP.md) for the full tool reference.
@@ -433,9 +452,10 @@ Measured on a real 6-month, ~8,000-message mailbox:
 - **Local-first.** The index, bodies, and profile never leave your machine. No
   telemetry, no account, no cloud
   ([ADR-0002](adr/0002-local-index-only-for-privacy.md)).
-- **Read-only on the mailbox.** The tool never sends, deletes, labels, or
-  archives. "Read-only" means *never mutates* — fetching message content is
-  permitted.
+- **Read-only on the mailbox by default.** The tool never sends or deletes.
+  Archive + label edits are an explicit opt-in (`--enable-writes`, least-
+  privilege `gmail.modify`); without it the install is read-only at the token
+  level. Fetching message content is always permitted.
 - The index DB contains message text — treat
   `${XDG_DATA_HOME:-~/.local/share}/mail-index/` as sensitive. Optional at-rest
   encryption (OS-level FileVault / full-disk encryption) is recommended; the

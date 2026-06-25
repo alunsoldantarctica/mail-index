@@ -22,6 +22,7 @@
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
 import { IndexError } from './db.js';
 import { bm25Expr, projectBody, projectRecipients } from './fts.js';
+import { classifyCategory, classifyDirection } from '../ingest/classify.js';
 import {
   BODY_STATES,
   BODY_STATE_RANK,
@@ -708,6 +709,58 @@ export class Repo {
       `SELECT gmail_url FROM messages WHERE account = ? AND gmail_message_id = ?`,
     ).get(account, gmailMessageId) as { gmail_url: string | null } | undefined;
     return row?.gmail_url ?? null;
+  }
+
+  /**
+   * Apply a label add/remove to one already-indexed message and re-derive the
+   * label-driven columns, so the local index reflects an opt-in mailbox write
+   * without waiting for the next sync. INDEX-ONLY: this does NOT touch the
+   * provider — the caller performs the provider `modify` first (via
+   * `MailSource.modify`) and calls this only on success.
+   *
+   * Mirrors the ingest mapping (ingest/sync.ts): `labels_json` is the raw set;
+   * `category`/`direction` come from {@link classifyCategory}/
+   * {@link classifyDirection}; `unread`/`starred`/`important` track the
+   * `UNREAD`/`STARRED`/`IMPORTANT` labels. `is_list` is header-derived, not
+   * label-derived, so it is left untouched.
+   *
+   * Returns the resulting label array, or `null` if the message is not indexed.
+   */
+  applyLabelChange(
+    account: string,
+    gmailMessageId: string,
+    change: { add?: readonly string[]; remove?: readonly string[] },
+  ): string[] | null {
+    const row = this.#prepare(
+      `SELECT labels_json, from_addr FROM messages WHERE account = ? AND gmail_message_id = ?`,
+    ).get(account, gmailMessageId) as
+      | { labels_json: string | null; from_addr: string | null }
+      | undefined;
+    if (!row) return null;
+
+    const current: string[] = row.labels_json ? (JSON.parse(row.labels_json) as string[]) : [];
+    const removeSet = new Set(change.remove ?? []);
+    const next = current.filter((l) => !removeSet.has(l));
+    for (const add of change.add ?? []) {
+      if (add.trim() !== '' && !next.includes(add)) next.push(add);
+    }
+
+    this.#prepare(
+      `UPDATE messages SET
+         labels_json = ?, category = ?, direction = ?,
+         unread = ?, starred = ?, important = ?
+       WHERE account = ? AND gmail_message_id = ?`,
+    ).run(
+      JSON.stringify(next),
+      classifyCategory(next),
+      classifyDirection(next, row.from_addr),
+      bool(next.includes('UNREAD')),
+      bool(next.includes('STARRED')),
+      bool(next.includes('IMPORTANT')),
+      account,
+      gmailMessageId,
+    );
+    return next;
   }
 
   /**
