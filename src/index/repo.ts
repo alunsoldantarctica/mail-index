@@ -865,6 +865,65 @@ export class Repo {
   }
 
   /**
+   * Replace `account`'s cached Gmail label catalogue (id → name → type) with
+   * `labels`. Full replace in one transaction so a label deleted provider-side
+   * disappears locally too. Refreshed each sync (ingest/sync-labels.ts); read by
+   * {@link labelMap} (display) and {@link labelNameToId} (write input). No-op on
+   * an empty list only if you intend to clear — callers skip the call on a
+   * failed fetch rather than wiping a good catalogue.
+   */
+  setLabels(
+    account: string,
+    labels: readonly { id: string; name: string; type?: string }[],
+  ): void {
+    const now = new Date().toISOString();
+    const del = this.#prepare(`DELETE FROM labels WHERE account = ?`);
+    const ins = this.#prepare(
+      `INSERT INTO labels (account, label_id, name, type, updated_at) VALUES (?, ?, ?, ?, ?)`,
+    );
+    this.transaction(() => {
+      del.run(account);
+      for (const l of labels) ins.run(account, l.id, l.name, l.type ?? null, now);
+    });
+  }
+
+  /**
+   * `account`'s label id → human name map (display translation). System labels
+   * (`INBOX`, `STARRED`, `CATEGORY_*`) map to themselves; opaque user ids
+   * (`Label_123…`) map to their display name. Empty when no catalogue is cached
+   * yet (callers then fall back to raw ids).
+   */
+  labelMap(account: string): Map<string, string> {
+    const rows = this.#prepare(
+      `SELECT label_id, name FROM labels WHERE account = ?`,
+    ).all(account) as { label_id: string; name: string }[];
+    return new Map(rows.map((r) => [r.label_id, r.name]));
+  }
+
+  /**
+   * `account`'s name → id map for write input (case-insensitive on name). Lets a
+   * user pass a friendly label name (`"Coverage Review"`) that the gws path must
+   * send to the API as an id. System labels and unknown strings have no entry —
+   * callers pass those through unchanged.
+   */
+  labelNameToId(account: string): Map<string, string> {
+    const rows = this.#prepare(
+      `SELECT label_id, name FROM labels WHERE account = ?`,
+    ).all(account) as { label_id: string; name: string }[];
+    return new Map(rows.map((r) => [r.name.toLowerCase(), r.label_id]));
+  }
+
+  /**
+   * Render a list of label ids to human names for display, via {@link labelMap}.
+   * Unknown ids (no cached catalogue, or a label seen on a message but absent
+   * from the catalogue) pass through unchanged so nothing is ever dropped.
+   */
+  labelNames(account: string, ids: readonly string[]): string[] {
+    const map = this.labelMap(account);
+    return ids.map((id) => map.get(id) ?? id);
+  }
+
+  /**
    * Select `meta`-state message ids for an account that an enrich run should
    * promote (SCOPE 1.1, PLAN §7 phase 2). Only `body_state='meta'` rows are
    * returned — already-enriched (`full`) and demoted (`summary-only`) rows are

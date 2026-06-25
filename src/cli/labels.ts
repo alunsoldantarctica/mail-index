@@ -35,10 +35,10 @@ export async function runLabelChange(
   return applyLabelChange({ account: ref.account, id: ref.id, source, repo, change });
 }
 
-/** One-line CLI summary of a completed mutation. */
+/** One-line CLI summary of a completed mutation (labels shown as human names). */
 export function formatMutateResult(verb: string, result: MutateResult): string {
   const where = result.indexed
-    ? `local labels now: ${(result.labels ?? []).join(', ') || '∅'}`
+    ? `local labels now: ${(result.labelNames ?? []).join(', ') || '∅'}`
     : 'message not in local index (provider updated; will reconcile on next sync)';
   return `${verb} ${result.account}:${result.id} — ${where}\n`;
 }

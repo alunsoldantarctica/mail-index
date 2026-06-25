@@ -127,6 +127,25 @@ test('GogAdapter.modify is a no-op (no spawn) when nothing to add or remove', as
   assert.equal(called, false, 'an empty change must not reach the provider');
 });
 
+test('GogAdapter.listLabels parses `gmail labels list` into id/name/type', async () => {
+  let captured: readonly string[] = [];
+  const adapter = new GogAdapter({
+    account: 'al@example.com',
+    runner: (args) => {
+      captured = args;
+      return Promise.resolve({
+        labels: [
+          { id: 'STARRED', name: 'STARRED', type: 'system' },
+          { id: 'Label_7', name: 'Coverage Review', type: 'user' },
+        ],
+      });
+    },
+  });
+  const labels = await adapter.listLabels();
+  assert.deepEqual(captured, ['gmail', 'labels', 'list', '-a', 'al@example.com']);
+  assert.equal(labels.find((l) => l.id === 'Label_7')?.name, 'Coverage Review');
+});
+
 test('GogAdapter.modify maps an insufficient-scope failure to InsufficientScopeError', async () => {
   const adapter = new GogAdapter({
     account: 'al@example.com',

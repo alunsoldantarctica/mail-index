@@ -415,6 +415,36 @@ const m008_topics: Migration = {
   },
 };
 
+/**
+ * m009 — the per-account Gmail label catalogue (id → human name).
+ *
+ * Messages carry opaque label *ids* (`Label_123…` for user labels; system
+ * labels like `INBOX`/`STARRED` are self-named). The human name lives only in
+ * the provider's labels resource. We cache that small, stable map locally —
+ * refreshed each sync the way inbox membership is (reconcile-inbox.ts) — so
+ * display can translate id→name and writes can translate name→id without a
+ * per-call provider round-trip (zero-egress core: the fetch rides the same
+ * adapter spawn seam as every other provider call). Pure additive DDL.
+ */
+const m009_labels: Migration = {
+  version: 9,
+  name: 'gmail label catalogue (id → name)',
+  up: (db) => {
+    db.exec(`
+      CREATE TABLE labels (
+        account    TEXT NOT NULL,
+        label_id   TEXT NOT NULL,        -- Gmail label id (INBOX, Label_123…)
+        name       TEXT NOT NULL,        -- human-readable name
+        type       TEXT,                 -- 'system' | 'user'
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account, label_id)
+      );
+
+      CREATE INDEX idx_labels_name ON labels (account, name);
+    `);
+  },
+};
+
 /** All migrations, in ascending version order. Append-only. */
 export const MIGRATIONS: readonly Migration[] = [
   m001_initial,
@@ -425,6 +455,7 @@ export const MIGRATIONS: readonly Migration[] = [
   m006_registrable_domain,
   m007_porter_fts,
   m008_topics,
+  m009_labels,
 ];
 
 /** Read the database's applied schema version (SQLite `user_version`). */

@@ -15,7 +15,7 @@
  * {@link headerBag} sees every `List-*` header `is_list` classification needs.
  */
 
-import type { MessageMetadata } from '../index.js';
+import type { MessageMetadata, ProviderLabel } from '../index.js';
 
 /** A header entry in a Gmail message payload. */
 export interface GmailHeader {
@@ -150,4 +150,18 @@ export function normaliseSince(since: string): string {
   const mo = /^(\d+)mo$/.exec(since.trim());
   if (mo) return `${mo[1]}m`;
   return since.trim();
+}
+
+/**
+ * Normalise a Gmail `labels.list` payload (gog `gmail labels list` and gws
+ * `gmail users labels list` return the identical `{labels:[{id,name,type}]}`
+ * shape) into the provider-neutral {@link ProviderLabel} list. Drops entries
+ * missing an id or name.
+ */
+export function parseLabelList(
+  labels: { id?: string; name?: string; type?: string }[] | undefined,
+): ProviderLabel[] {
+  return (labels ?? [])
+    .filter((l): l is { id: string; name: string; type?: string } => !!l.id && !!l.name)
+    .map((l) => ({ id: l.id, name: l.name, ...(l.type ? { type: l.type } : {}) }));
 }

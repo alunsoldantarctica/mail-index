@@ -123,6 +123,29 @@ test('GwsAdapter.modify is a no-op (no spawn) when nothing to add or remove', as
   assert.equal(called, false);
 });
 
+test('GwsAdapter.listLabels parses the labels resource into id/name/type', async () => {
+  let captured: readonly string[] = [];
+  const adapter = new GwsAdapter({
+    configDir: '/tmp/x',
+    runner: (args) => {
+      captured = args;
+      return Promise.resolve({
+        labels: [
+          { id: 'INBOX', name: 'INBOX', type: 'system' },
+          { id: 'Label_7', name: 'Coverage Review', type: 'user' },
+          { id: 'bad' }, // missing name → dropped
+        ],
+      });
+    },
+  });
+  const labels = await adapter.listLabels();
+  assert.deepEqual(captured, ['gmail', 'users', 'labels', 'list', '--params', '{"userId":"me"}']);
+  assert.deepEqual(labels, [
+    { id: 'INBOX', name: 'INBOX', type: 'system' },
+    { id: 'Label_7', name: 'Coverage Review', type: 'user' },
+  ]);
+});
+
 test('GwsAdapter.modify maps an insufficient-scope failure to InsufficientScopeError', async () => {
   const adapter = new GwsAdapter({
     configDir: '/tmp/x',
