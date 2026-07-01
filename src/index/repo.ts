@@ -39,6 +39,14 @@ import {
 
 const bool = (v: boolean | undefined): number => (v ? 1 : 0);
 
+/**
+ * How long an unfinished `sync_runs` row stays a valid lock before it is treated
+ * as a DEAD lock left by a crashed sync (see {@link Repo.activeSyncRun}). 6h —
+ * comfortably above the longest legitimate run (an initial whole-mailbox sweep),
+ * so a live sync is never reaped, while a crashed one self-clears within a day.
+ */
+export const STALE_LOCK_MS = 6 * 60 * 60 * 1000;
+
 /** Input for {@link Repo.upsertMessage}. Mirrors PLAN §6 `messages`. */
 export interface MessageInput {
   account: string;
@@ -1095,18 +1103,27 @@ export class Repo {
   }
 
   /**
-   * The id of an in-progress sync_runs row for `account` (started but not yet
-   * finished), or undefined when none. An in-progress row is the per-account
-   * sync LOCK (ADR-0005): the sync layer refuses a second concurrent run while
-   * one exists. When `exceptId` is given it is ignored — so a freshly opened run
-   * can ask "is anyone else running?" without seeing itself.
+   * The id of a LIVE in-progress sync_runs row for `account` (started, not yet
+   * finished, and started within {@link STALE_LOCK_MS}), or undefined when none.
+   * A live in-progress row is the per-account sync LOCK (ADR-0005): the sync
+   * layer refuses a second concurrent run while one exists. When `exceptId` is
+   * given it is ignored — so a freshly opened run can ask "is anyone else
+   * running?" without seeing itself.
+   *
+   * A row whose `started_at` is older than {@link STALE_LOCK_MS} is treated as a
+   * DEAD lock (the sync process crashed without closing its row) and does NOT
+   * block — otherwise one crashed sync would wedge the account forever, blocking
+   * both manual syncs and the ADR-0005 auto-refresh. The threshold sits above the
+   * longest legitimate run (an initial whole-mailbox sweep) so a live long sync
+   * is never mistaken for dead.
    */
   activeSyncRun(account: string, exceptId?: number): number | undefined {
+    const cutoff = new Date(Date.now() - STALE_LOCK_MS).toISOString();
     const row = this.#prepare(
       `SELECT id FROM sync_runs
-        WHERE account = ? AND finished_at IS NULL AND id != ?
+        WHERE account = ? AND finished_at IS NULL AND id != ? AND started_at > ?
         ORDER BY id LIMIT 1`,
-    ).get(account, exceptId ?? -1) as { id: number } | undefined;
+    ).get(account, exceptId ?? -1, cutoff) as { id: number } | undefined;
     return row?.id;
   }
 

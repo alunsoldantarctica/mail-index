@@ -37,13 +37,26 @@ sensible default limit. Refs (`<account>:<id>`) are stable handles the CLI's
 
 ## The two cross-cutting contracts
 
-### Freshness — `index_as_of` on every response
+### Freshness — a `freshness` block on every response
 
-Every tool response carries `index_as_of`: the timestamp of the latest finished,
-error-free sync for the relevant account. Cross-account (no `account` arg) it is
-the **oldest** such timestamp across accounts — the index is only as fresh as
-its stalest mailbox. `null` means never synced. The agent uses it to decide
-whether to trust a time-sensitive answer.
+Every tool response carries a `freshness` block so the agent never has to guess
+how current the data is or how to refresh it:
+
+```jsonc
+"freshness": {
+  "index_as_of": "2026-07-01T11:53:00.951Z", // latest error-free sync for the scope (null = never synced)
+  "age_seconds": 420,                          // how old that is (null = never synced)
+  "stale": false,                              // true when older than the ~3h threshold
+  "syncing": true,                             // a sync for this account is running now
+  "refresh_command": "mail-index sync --account unsold-group" // how to refresh manually
+}
+```
+
+`index_as_of` is also mirrored at the top level for back-compat. Cross-account
+(no `account` arg on a multi-mailbox install) `index_as_of` is the **oldest**
+such timestamp across accounts — the index is only as fresh as its stalest
+mailbox. On a single-mailbox install, a call that omits `account` is scoped to
+that sole mailbox.
 
 ### Command handbacks — O(N) work is never inline
 
@@ -56,16 +69,18 @@ bulk enrich, graph build, compact — is returned as a **command handback**: the
 exact `mail-index` CLI command string the agent runs itself. The CLI is the
 execution engine; the MCP is the brain that knows which command to run.
 
-### Stale time-sensitive reads spawn a background sync
+### Any stale read spawns a background sync
 
-`catch_up` and `digest_sources` are time-sensitive. When the index is stale
-(older than 1 hour), they return current data **immediately** and spawn a
-**detached** incremental `mail-index sync`
-([ADR-0005](adr/0005-stale-reads-trigger-background-sync.md)), reporting
-`sync_started: true` and `eta_seconds`. They never block. The agent polls
-`sync_status` or re-calls the tool after the ETA. At most one sync per account
-runs at a time (the in-progress `sync_runs` row is the lock); WAL mode means the
-single background writer never blocks reads.
+When an account-scoped call finds the index stale (older than ~3 hours), it
+returns current data **immediately** and spawns a **detached** incremental
+`mail-index sync` ([ADR-0005](adr/0005-stale-reads-trigger-background-sync.md)),
+reporting `sync_started: true` and `eta_seconds` (and flipping `freshness.syncing`
+to true). This is not limited to `catch_up` / `digest_sources` — every response
+funnels through the same freshness stamp, so a plain `search` on a day-old index
+kicks off a refresh too. It never blocks. The agent polls `sync_status` or
+re-calls the tool after the ETA. At most one sync per account runs at a time (the
+in-progress `sync_runs` row is the lock); WAL mode means the single background
+writer never blocks reads.
 
 ---
 

@@ -187,6 +187,22 @@ test('sync_runs start/finish audit row', () => {
   assert.ok(row.finished_at);
 });
 
+test('activeSyncRun: a fresh in-progress row locks; a >6h-old one is a dead lock', () => {
+  const repo = freshRepo();
+  const id = repo.startSyncRun({ account: 'a', phase: 'sync', selector: null });
+  assert.equal(repo.activeSyncRun('a'), id, 'a fresh in-progress row is the live lock');
+
+  // Backdate its start past the stale-lock threshold (crashed sync, row never closed).
+  const old = new Date(Date.now() - 7 * 3_600_000).toISOString();
+  repo.db.prepare('UPDATE sync_runs SET started_at = ? WHERE id = ?').run(old, id);
+  assert.equal(repo.activeSyncRun('a'), undefined, 'a stale lock no longer blocks');
+
+  // A new run can now take the lock.
+  const next = repo.startSyncRun({ account: 'a', phase: 'sync', selector: null });
+  assert.equal(repo.activeSyncRun('a', next), undefined, 'only the stale row exists besides the new one');
+  assert.equal(repo.activeSyncRun('a'), next, 'the new run is the live lock');
+});
+
 test('closed-enum guards throw IndexError', () => {
   const repo = freshRepo();
   assert.throws(

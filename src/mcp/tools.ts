@@ -23,13 +23,16 @@
  *    graph build, compact) is NEVER run inline; the tool returns the exact
  *    `mail-index` CLI command string the agent runs itself (CONTEXT.md "Command
  *    handback"). The CLI is the execution engine; the MCP is the brain.
- *  - **`index_as_of` on EVERY response (ADR-0005).** {@link withMeta} stamps the
- *    freshness of the relevant account(s) onto every result.
- *  - **Stale time-sensitive reads spawn a DETACHED background sync (ADR-0005).**
- *    `catch_up` / `digest_sources`, when the index is stale, return current data
- *    immediately AND kick off an incremental sync (debounced; reuses the existing
- *    sync + the sync_runs lock so there is never a second writer), reporting
- *    `sync_started` + `eta_seconds`. They never block.
+ *  - **A `freshness` block on EVERY response (ADR-0005).** {@link withMeta} stamps
+ *    `index_as_of`, `age_seconds`, `stale`, `syncing`, and the `refresh_command`
+ *    onto every result so the agent always knows how fresh the data is and how to
+ *    refresh it.
+ *  - **Any stale account-scoped read spawns a DETACHED background sync (ADR-0005).**
+ *    {@link withMeta} — the single freshness authority — returns current data
+ *    immediately AND, when the index is older than {@link STALE_AFTER_MS}, kicks
+ *    off an incremental sync (debounced; reuses the existing sync + the sync_runs
+ *    lock so there is never a second writer), reporting `sync_started` +
+ *    `eta_seconds`. It never blocks.
  *  - **Recall, not lookup (DESIGN TEST a).** `search` is fuzzy ranked FTS;
  *    `find_person` ranks Correspondents first and resolves substrings;
  *    `graph_neighbors` falls back to a ranked near-miss set rather than a bare
@@ -100,9 +103,10 @@ export interface ToolContext {
   now?: () => Date;
 }
 
-/** The freshness staleness threshold for time-sensitive reads (ADR-0005): ~12h.
+/** The freshness staleness threshold for reads (ADR-0005): "a few hours" (3h).
+ * Any account-scoped call on a stale index auto-spawns a background refresh.
  * Per-account override is a v1.x follow-up; this global default matches the ADR. */
-export const STALE_AFTER_MS = 12 * 60 * 60 * 1000;
+export const STALE_AFTER_MS = 3 * 60 * 60 * 1000;
 /** Reported ETA for a spawned background incremental sync (ADR-0005). */
 export const SYNC_ETA_SECONDS = 90;
 
@@ -140,14 +144,80 @@ function indexAsOf(repo: Repo, account?: string): string | null {
   return oldest;
 }
 
-/** A response carrying the ADR-0005 freshness stamp. */
-export interface WithMeta {
+/**
+ * The freshness/status block stamped on EVERY response (ADR-0005): tells the
+ * agent how stale the index is and how to refresh it, so it never has to guess.
+ */
+export interface Freshness {
+  /** Latest error-free sync completion for the scope (ISO), or null if never synced. */
   index_as_of: string | null;
+  /** Age of the index in seconds, or null when never synced. */
+  age_seconds: number | null;
+  /** True when older than {@link STALE_AFTER_MS} (or never synced). */
+  stale: boolean;
+  /** True when a sync for this account is in flight right now. */
+  syncing: boolean;
+  /** The CLI command to refresh this scope manually. */
+  refresh_command: string;
 }
 
-/** Stamp `index_as_of` onto a result object (ADR-0005: every response carries it). */
-function withMeta<T extends object>(repo: Repo, account: string | undefined, body: T): T & WithMeta {
-  return { ...body, index_as_of: indexAsOf(repo, account) };
+/** A response carrying the ADR-0005 freshness stamp. */
+export interface WithMeta {
+  /** Kept top-level for back-compat (ADR-0005); mirrors `freshness.index_as_of`. */
+  index_as_of: string | null;
+  /** Full freshness/status block — present on every response. */
+  freshness: Freshness;
+  /** Set when this call spawned a background refresh because the index was stale. */
+  sync_started?: boolean;
+  /** ETA for that background refresh, in seconds. */
+  eta_seconds?: number;
+}
+
+/**
+ * Stamp freshness onto a result AND auto-refresh when stale (ADR-0005).
+ *
+ * Every response carries a `freshness` block so the agent always knows how fresh
+ * the data is and how to refresh it. When the scope is a single account whose
+ * index is older than {@link STALE_AFTER_MS} ("a few hours") and no sync is
+ * already running, this spawns a DETACHED incremental sync (never blocks) and
+ * annotates the result with `sync_started` + `eta_seconds`. The debounce (one
+ * writer; the sync_runs lock is the guard) makes calling this on every response
+ * safe — this is the single freshness + auto-refresh authority for the server.
+ */
+function withMeta<T extends object>(ctx: ToolContext, account: string | undefined, body: T): T & WithMeta {
+  // When the caller omitted `account` but there's a single mailbox, scope
+  // freshness (and the auto-refresh) to it — otherwise a no-account read (the
+  // common single-mailbox case) would never auto-refresh. A genuinely
+  // multi-account cross read stays cross-account (oldest stamp, no single spawn).
+  const acct = account ?? soleAccount(ctx);
+  const asOf = indexAsOf(ctx.repo, acct);
+  const now = (ctx.now?.() ?? new Date()).getTime();
+  const ageMs = asOf == null ? null : now - new Date(asOf).getTime();
+  const stale = ageMs == null || ageMs > STALE_AFTER_MS;
+  const syncing = acct != null && ctx.repo.activeSyncRun(acct) != null;
+  const refresh_command = acct
+    ? handback('sync', '--account', acct)
+    : handback('sync', '--all-accounts');
+
+  const meta: WithMeta = {
+    index_as_of: asOf,
+    freshness: { index_as_of: asOf, age_seconds: ageMs == null ? null : Math.floor(ageMs / 1000), stale, syncing, refresh_command },
+  };
+
+  // Auto-refresh on any stale account-scoped read (ADR-0005): spawn a detached
+  // INCREMENTAL sync. `since` = days elapsed + 1 day of overlap (idempotent
+  // upsert makes re-fetching the boundary day harmless); a never-synced account
+  // passes no `since`, so its first sweep is a correct initial full sync.
+  if (acct && stale && !syncing && ctx.backgroundSync) {
+    const since = asOf == null ? undefined : `${Math.ceil(ageMs! / 86_400_000) + 1}d`;
+    if (ctx.backgroundSync(acct, since)) {
+      meta.sync_started = true;
+      meta.eta_seconds = SYNC_ETA_SECONDS;
+      meta.freshness.syncing = true;
+    }
+  }
+
+  return { ...body, ...meta };
 }
 
 // ---- command handbacks (ADR-0001) ----------------------------------------
@@ -346,7 +416,7 @@ export function search(ctx: ToolContext, args: SearchArgs): WithMeta & { hits: H
     limit: args.limit ?? 15,
   });
   const render = labelRenderer(ctx.repo);
-  return withMeta(ctx.repo, args.account, { hits: rows.map((r) => toHit(r, render)) });
+  return withMeta(ctx, args.account, { hits: rows.map((r) => toHit(r, render)) });
 }
 
 export interface ListLabeledArgs {
@@ -373,7 +443,7 @@ export function listLabeled(ctx: ToolContext, args: ListLabeledArgs): WithMeta &
     limit: args.limit ?? 15,
   });
   const render = labelRenderer(ctx.repo);
-  return withMeta(ctx.repo, args.account, { hits: rows.map((r) => toHit(r, render)) });
+  return withMeta(ctx, args.account, { hits: rows.map((r) => toHit(r, render)) });
 }
 
 export interface RefreshInboxArgs {
@@ -435,7 +505,7 @@ export async function refreshInbox(ctx: ToolContext, args: RefreshInboxArgs): Pr
 
   const rows = ctx.repo.messagesByLabel('INBOX', { account, limit });
   const render = labelRenderer(ctx.repo);
-  return withMeta(ctx.repo, account, { refreshed, ...counts, hits: rows.map((r) => toHit(r, render)) });
+  return withMeta(ctx, account, { refreshed, ...counts, hits: rows.map((r) => toHit(r, render)) });
 }
 
 export interface GetMessageArgs {
@@ -518,7 +588,7 @@ export async function getMessage(ctx: ToolContext, args: GetMessageArgs): Promis
   // meaning is in the images, not the text.
   const ocrImages = parseOcrImages(row.ocr_images_json);
   const needsOcr = isLikelyImageOnly(row.body_text, ocrImages.length);
-  return withMeta(ctx.repo, account, {
+  return withMeta(ctx, account, {
     ref: messageRef(row),
     account: row.account,
     from: row.from_addr,
@@ -590,7 +660,7 @@ async function mutateLabels(
   const source = ctx.buildSource(accCfg);
   try {
     const result = await applyMailboxLabelChange({ account, id, source, repo: ctx.repo, change });
-    return withMeta(ctx.repo, account, {
+    return withMeta(ctx, account, {
       ref: `${account}:${id}`,
       labels: result.labelNames,
       indexed: result.indexed,
@@ -666,7 +736,7 @@ export function getThread(
     throw new McpToolError(`thread ${account}:${id} is not in the index`);
   }
   const render = labelRenderer(ctx.repo);
-  return withMeta(ctx.repo, account, {
+  return withMeta(ctx, account, {
     thread: row ? toThread(row) : null,
     summary: row?.summary_text ?? null,
     messages: messages.map((m) => toHit(m, render)),
@@ -697,7 +767,7 @@ export function listContacts(
     filter,
     limit: args.limit ?? 20,
   });
-  return withMeta(ctx.repo, args.account, { contacts: rows.map(toContact) });
+  return withMeta(ctx, args.account, { contacts: rows.map(toContact) });
 }
 
 export interface GetContactArgs {
@@ -736,10 +806,10 @@ export function getContact(
     const candidates = ctx.repo
       .findContacts(args.address, { ...(account ? { account } : {}), limit: 10 })
       .map(toContact);
-    return withMeta(ctx.repo, account, { contact: null, recentThreads: [], candidates });
+    return withMeta(ctx, account, { contact: null, recentThreads: [], candidates });
   }
   const recentThreads = ctx.repo.threadsForContact(row.account, row.address, 10).map(toThread);
-  return withMeta(ctx.repo, row.account, { contact: toContact(row), recentThreads });
+  return withMeta(ctx, row.account, { contact: toContact(row), recentThreads });
 }
 
 export interface FindPersonArgs {
@@ -763,7 +833,7 @@ export function findPerson(
     ...(args.account ? { account: args.account } : {}),
     limit: args.limit ?? 10,
   });
-  return withMeta(ctx.repo, args.account, { matches: rows.map(toContact) });
+  return withMeta(ctx, args.account, { matches: rows.map(toContact) });
 }
 
 export interface ListThreadsArgs {
@@ -797,7 +867,7 @@ export function listThreads(
   } else {
     throw new McpToolError('list_threads requires either "contact" or "query"');
   }
-  return withMeta(ctx.repo, args.account, { threads: rows.map(toThread) });
+  return withMeta(ctx, args.account, { threads: rows.map(toThread) });
 }
 
 export interface GraphNeighborsArgs {
@@ -825,12 +895,12 @@ export function graphNeighbors(
     ? ctx.repo.graphNeighbors(account, args.address, args.limit ?? 15)
     : [];
   if (neighbors.length > 0) {
-    return withMeta(ctx.repo, account, { neighbors, fallback: false });
+    return withMeta(ctx, account, { neighbors, fallback: false });
   }
   // Near-miss fallback: project the ranked contact candidates as zero-weight
   // neighbours so the agent still gets ranked entry points.
   const fb = ctx.repo.findContacts(args.address, { ...(account ? { account } : {}), limit: 10 });
-  return withMeta(ctx.repo, account, {
+  return withMeta(ctx, account, {
     neighbors: fb
       .filter((c) => c.address !== args.address)
       .map((c) => ({
@@ -870,7 +940,7 @@ export function graphCommunities(
   if (communities.length === 0 && account) {
     body.build_command = handback('graph', 'build', '--account', account);
   }
-  return withMeta(ctx.repo, account, body);
+  return withMeta(ctx, account, body);
 }
 
 // ---- curation write-back loop (M3.1, PLAN §11) ----------------------------
@@ -890,7 +960,7 @@ export function interestPropose(ctx: ToolContext, args: InterestProposeArgs): Wi
     ...(args.contactLimit != null ? { contactLimit: args.contactLimit } : {}),
     ...(args.domainLimit != null ? { domainLimit: args.domainLimit } : {}),
   });
-  return withMeta(ctx.repo, account, { proposal });
+  return withMeta(ctx, account, { proposal });
 }
 
 export interface InterestSetArgs {
@@ -910,7 +980,7 @@ export function interestSet(ctx: ToolContext, args: InterestSetArgs): WithMeta &
     ...(args.domains ? { domains: args.domains } : {}),
     ...(args.keywords ? { keywords: args.keywords } : {}),
   });
-  return withMeta(ctx.repo, account, { result });
+  return withMeta(ctx, account, { result });
 }
 
 export interface InterestGetArgs {
@@ -922,7 +992,7 @@ export function interestGet(ctx: ToolContext, args: InterestGetArgs): WithMeta &
   profile: ReturnType<typeof curationGet>;
 } {
   const account = requireAccount(ctx, args.account, 'interest_get');
-  return withMeta(ctx.repo, account, { profile: curationGet(ctx.repo, account) });
+  return withMeta(ctx, account, { profile: curationGet(ctx.repo, account) });
 }
 
 // ---- summarization write-back (M3.5, ADR-0003) ----------------------------
@@ -941,7 +1011,7 @@ export function saveSummaryTool(ctx: ToolContext, args: SaveSummaryArgs): WithMe
   const { account, id } = parseToolRef(args.ref);
   const level = args.level ?? 'message';
   const result = saveSummary(ctx.repo, account, level, id, args.text);
-  return withMeta(ctx.repo, account, { result });
+  return withMeta(ctx, account, { result });
 }
 
 // ---- domain categorization write-back (M3.5, PLAN §12) --------------------
@@ -962,7 +1032,7 @@ export function domainsToCategorizeTool(
     ...(args.includeCategorized != null ? { includeCategorized: args.includeCategorized } : {}),
     ...(args.limit != null ? { limit: args.limit } : {}),
   });
-  return withMeta(ctx.repo, account, { candidates });
+  return withMeta(ctx, account, { candidates });
 }
 
 export interface SaveDomainCategoryArgs {
@@ -979,7 +1049,7 @@ export function saveDomainCategoryTool(
 ): WithMeta & { result: ReturnType<typeof wbSaveDomainCategory> } {
   const account = requireAccount(ctx, args.account, 'save_domain_category');
   const result = wbSaveDomainCategory(ctx.repo, account, args.domain, args.category, args.note ?? null);
-  return withMeta(ctx.repo, account, { result });
+  return withMeta(ctx, account, { result });
 }
 
 // ---- cadence (deterministic correspondent frequency) ----------------------
@@ -1008,7 +1078,7 @@ export function cadenceTool(ctx: ToolContext, args: CadenceArgs): WithMeta & { c
   if (args.since != null) opts.sinceMs = parseSince(args.since, now);
   if (args.limit != null) opts.limit = args.limit;
   const cadence = computeCadence(ctx.repo, account, opts);
-  return withMeta(ctx.repo, account, { cadence });
+  return withMeta(ctx, account, { cadence });
 }
 
 // ---- sync status (PLAN §12, ADR-0005) -------------------------------------
@@ -1049,7 +1119,7 @@ export function syncStatus(ctx: ToolContext, args: SyncStatusArgs): WithMeta & {
       bodyStates: counts,
     };
   });
-  return withMeta(ctx.repo, args.account, { accounts });
+  return withMeta(ctx, args.account, { accounts });
 }
 
 // =========================================================================
@@ -1110,14 +1180,14 @@ export function catchUp(ctx: ToolContext, args: CatchUpArgs): CatchUpResult {
   }
 
   const render = labelRenderer(ctx.repo);
-  const base: CatchUpResult = withMeta(ctx.repo, account, {
+  const base: CatchUpResult = withMeta(ctx, account, {
     since_ms: sinceMs,
     fromImportant: fromImportant.map((r) => toHit(r, render)),
     inUserThreads: inUserThreads.map((r) => toHit(r, render)),
     keywordHits: keywordHits.map((r) => toHit(r, render)),
     bodies_command: handback('enrich', '--account', account, '--profile'),
   });
-  return applyStaleSync(ctx, account, base);
+  return base;
 }
 
 export interface DigestSourcesArgs {
@@ -1172,7 +1242,7 @@ export function digestSources(ctx: ToolContext, args: DigestSourcesArgs): Digest
       unsummarized: number;
     }[];
 
-  const base: DigestSourcesResult = withMeta(ctx.repo, account, {
+  const base: DigestSourcesResult = withMeta(ctx, account, {
     sources: rows.map((r) => ({
       address: r.address,
       displayName: r.display_name,
@@ -1185,45 +1255,7 @@ export function digestSources(ctx: ToolContext, args: DigestSourcesArgs): Digest
     })),
     read_command: handback('search', '<sender or subject>', '--account', account),
   });
-  return applyStaleSync(ctx, account, base);
-}
-
-// ---- stale-read background sync (ADR-0005) --------------------------------
-
-/**
- * If the account's index is stale (older than {@link STALE_AFTER_MS}) and no
- * sync is already running, spawn a DETACHED incremental sync and annotate the
- * result with `sync_started` + `eta_seconds` (ADR-0005). Never blocks; the
- * debounce (no sync started when one is in flight, or when fresh) lives here so
- * both composites share it. The actual detached spawn is `ctx.backgroundSync`.
- */
-function applyStaleSync<T extends { sync_started?: boolean; eta_seconds?: number }>(
-  ctx: ToolContext,
-  account: string,
-  result: T,
-): T {
-  const asOf = indexAsOf(ctx.repo, account);
-  const now = (ctx.now?.() ?? new Date()).getTime();
-  const stale = asOf == null || now - new Date(asOf).getTime() > STALE_AFTER_MS;
-  if (!stale) return result;
-  // Debounce: never two writers (WAL is on; the sync_runs lock is the guard).
-  if (ctx.repo.activeSyncRun(account) != null) return result;
-  if (!ctx.backgroundSync) return result;
-  // ADR-0005: the background sweep must be INCREMENTAL, never a full sweep. Derive
-  // a relative `--since` from the last-synced timestamp (Gmail `newer_than:` takes
-  // relative tokens, not ISO) — days elapsed + 1 day of overlap (idempotent upsert
-  // makes re-fetching the boundary day harmless). A never-synced account (asOf null)
-  // passes no `since`, so its first sweep is a correct initial full sync.
-  const since =
-    asOf == null
-      ? undefined
-      : `${Math.ceil((now - new Date(asOf).getTime()) / 86_400_000) + 1}d`;
-  const started = ctx.backgroundSync(account, since);
-  if (started) {
-    result.sync_started = true;
-    result.eta_seconds = SYNC_ETA_SECONDS;
-  }
-  return result;
+  return base;
 }
 
 // ---- shared SQL + helpers -------------------------------------------------
