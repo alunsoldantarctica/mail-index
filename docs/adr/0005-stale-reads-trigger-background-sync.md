@@ -25,3 +25,35 @@ exactly the blocking we forbid. True push lands in v1.x via an MCP resource
 (`mailindex://sync/status`) with `resources/updated` subscription
 notifications, once client support matures; the status shape is designed now
 so subscriptions bolt on without contract changes.
+
+## Amendment (2026-07-01): freshness block on every response; auto-refresh generalised to every account-scoped read
+
+Two changes, driven by an agent burning several turns on a 6-day-stale index
+that a plain `search` never refreshed:
+
+1. **Freshness on every response, not just a bare `index_as_of`.** Every tool
+   result now carries a `freshness` block — `{ index_as_of, age_seconds, stale,
+   syncing, refresh_command }` — so the agent always knows how stale the data is
+   and the exact command to refresh it, without computing age itself.
+
+2. **Any stale account-scoped read auto-refreshes** — the trigger moved out of
+   the `catch_up` / `digest_sources` composites and into `withMeta`, the single
+   stamp every response passes through. The original "archival `search` never
+   triggers a sync" rule is retired: the cost of a debounced, detached,
+   incremental sync is negligible, and a silently-stale `search` is the exact
+   failure this ADR exists to prevent. When the caller omits `account` on a
+   single-mailbox install, freshness and the refresh are scoped to that sole
+   mailbox; a genuine multi-account cross read still stamps the oldest timestamp
+   and spawns nothing (no single account to pick).
+
+The staleness threshold drops from ~12 h to **3 h** ("a few hours"). All other
+guardrails stand unchanged: one sync per account (the `sync_runs` lock), the
+debounce, incremental `--since`, WAL-mode single writer, and the `sync_started`
++ `eta_seconds` feedback contract.
+
+**Dead-lock timeout.** The lock is an unfinished `sync_runs` row, so a sync that
+crashes without closing its row would wedge the account forever — blocking both
+manual syncs and this auto-refresh (observed in the wild: a row stuck for six
+days). `Repo.activeSyncRun` now ignores rows whose `started_at` is older than
+`STALE_LOCK_MS` (6 h — above the longest legitimate initial sweep), so a crashed
+lock self-clears within a day while a live long sync is never reaped.

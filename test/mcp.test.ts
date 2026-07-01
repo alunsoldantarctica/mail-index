@@ -203,6 +203,37 @@ test('search: ranked fuzzy hits, snippet-first, index_as_of stamped', () => {
   assert.equal(typeof hit.snippet, 'string');
   assert.ok(!('body' in hit), 'no body in a search hit (token-conscious)');
   assert.equal(res.index_as_of, NOW.toISOString(), 'every response carries index_as_of');
+  // ADR-0005: every response carries the full freshness/status block.
+  assert.ok(res.freshness, 'response carries a freshness block');
+  assert.equal(res.freshness.index_as_of, NOW.toISOString());
+  assert.equal(res.freshness.stale, false, 'a just-synced index is not stale');
+  assert.equal(res.freshness.syncing, false);
+  assert.equal(res.freshness.refresh_command, handback('sync', '--account', ACCOUNT));
+  assert.equal(typeof res.freshness.age_seconds, 'number');
+});
+
+test('search: a STALE index carries freshness.stale + auto-spawns a background refresh (ADR-0005)', () => {
+  const repo = freshRepo();
+  seedMailbox(repo);
+  // Stale: last sync 5 hours ago (> 3h threshold).
+  recordSync(repo, new Date(T - 5 * 3_600_000).toISOString());
+  let spawnedFor = null;
+  let spawnedSince = null;
+  const ctx = ctxFor(repo, {
+    backgroundSync: (account, since) => {
+      spawnedFor = account;
+      spawnedSince = since ?? null;
+      return true;
+    },
+  });
+
+  const res = search(ctx, { query: 'antarctica logistics', limit: 10 });
+  assert.equal(res.freshness.stale, true, 'a 5h-old index reads stale');
+  assert.equal(res.sync_started, true, 'an ordinary read on a stale index spawns a refresh');
+  assert.equal(res.eta_seconds, 90);
+  assert.equal(res.freshness.syncing, true, 'freshness reflects the just-spawned sync');
+  assert.equal(spawnedFor, ACCOUNT, 'refresh spawned for the queried account');
+  assert.equal(spawnedSince, '2d', 'refresh is incremental (ceil(5h/24h)+1 = 2 days)');
 });
 
 test('search: a vague half-remembered term still recalls (recall, not lookup)', () => {
@@ -498,7 +529,7 @@ test('catch_up: STALE index returns data + sync_started + eta + handback, spawns
   seedMailbox(repo);
   // Curate VIP important so its recent mail surfaces in fromImportant.
   curationSet(repo, ACCOUNT, { contacts: [{ address: 'vip@partner.example.com', curation: 'important' }] });
-  // Stale: last sync 13 hours ago (> 12h threshold).
+  // Stale: last sync 13 hours ago (> 3h threshold).
   recordSync(repo, new Date(T - 13 * 3_600_000).toISOString());
 
   let spawnedFor = null;
